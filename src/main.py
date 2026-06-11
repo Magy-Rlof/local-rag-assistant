@@ -15,6 +15,7 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 COLLECTION_NAME = "local_rag_sections"
 VECTOR_SIZE = 1024
 REQUEST_TIMEOUT = 90
+CHAT_MAX_TOKENS = 1400
 DEFAULT_TOP_K = 4
 CAREER_ANALYSIS_CANDIDATE_K = 20
 CAREER_ANALYSIS_TOP_K = 8
@@ -166,7 +167,7 @@ def rule_based_boost(question: str, section: dict) -> int:
     return score
 
 
-def build_rag_prompt(question: str, sections: list[dict]) -> str:
+def build_rag_prompt(question: str, sections: list[dict], include_citations: bool = True) -> str:
     context = "\n\n".join(
         (
             f"来源文件：{section['source_file']}\n"
@@ -175,12 +176,17 @@ def build_rag_prompt(question: str, sections: list[dict]) -> str:
         )
         for section in sections
     )
+    citation_rule = (
+        "- 回答后列出引用来源文件和标题"
+        if include_citations
+        else "- 不要在回答正文中列出引用来源，系统会在界面右侧单独展示引用来源"
+    )
     return f"""请基于给定资料回答用户问题。
 
 要求：
 - 只能使用资料中的信息回答
 - 如果资料不足，请明确说明“当前资料不足，无法确定”
-- 回答后列出引用来源文件和标题
+{citation_rule}
 - 不要编造资料中没有的信息
 
 资料：
@@ -197,7 +203,7 @@ def truncate_text(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
     return text[:max_chars].rstrip() + "\n...（内容已截断）"
 
 
-def ask_model(api_key: str, prompt: str) -> str:
+def ask_model_result(api_key: str, prompt: str) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -210,7 +216,7 @@ def ask_model(api_key: str, prompt: str) -> str:
                 "content": prompt,
             }
         ],
-        "max_tokens": 700,
+        "max_tokens": CHAT_MAX_TOKENS,
         "temperature": 0.3,
     }
 
@@ -226,12 +232,20 @@ def ask_model(api_key: str, prompt: str) -> str:
 
     choices = data.get("choices")
     if isinstance(choices, list) and choices:
-        message = choices[0].get("message", {})
+        choice = choices[0]
+        message = choice.get("message", {})
         content = message.get("content")
         if isinstance(content, str) and content.strip():
-            return content.strip()
+            return {
+                "content": content.strip(),
+                "truncated": choice.get("finish_reason") == "length",
+            }
 
     raise RuntimeError(f"无法解析模型返回结果：{data}")
+
+
+def ask_model(api_key: str, prompt: str) -> str:
+    return ask_model_result(api_key, prompt)["content"]
 
 
 def create_embedding(api_key: str, text: str) -> list[float]:
