@@ -1,6 +1,6 @@
 # Local RAG Assistant
 
-一个本地 RAG Demo，用于演示如何从 Markdown 文档中生成 Embedding，写入 Qdrant 本地向量库，并让大模型基于检索片段回答问题。
+一个本地 RAG Demo，用于演示如何从多行业、多岗位 Markdown 示例知识库中生成 Embedding，写入 Qdrant 本地向量库，并让大模型基于检索片段回答问题。
 
 本项目是“AI 求职与项目知识库助手”的 RAG 原型，重点学习 RAG 的基础流程，而不是追求复杂框架。
 
@@ -12,6 +12,7 @@
 - 使用 Qdrant 本地模式保存和检索向量
 - 将检索结果作为上下文发送给模型
 - 输出模型回答和引用来源
+- 支持用户替换 `data/` 目录中的 Markdown 资料后重新建索引
 
 ## 技术栈
 
@@ -33,9 +34,10 @@ local-rag-assistant/
   .env.example
   .gitignore
   data/
-    sample_job_description.md
-    sample_learning_note.md
-    sample_project.md
+    industries/
+    job_descriptions/
+    learning_notes/
+    projects/
   qdrant_storage/        # 本地生成，不提交
   src/
     build_index.py
@@ -85,11 +87,37 @@ python .\src\main.py
 这个示例项目有哪些功能？
 这个示例项目有什么局限性？
 这个示例项目适合用来学习什么？
-这个示例岗位需要哪些能力？
+AI 应用开发工程师需要哪些能力？
+Java 后端和 AI 应用开发有哪些结合点？
+企业软件行业有哪些 AI 应用场景？
 学习笔记里提到了哪些 AI 应用基础能力？
 ```
 
 程序会从 Qdrant 本地向量库中检索 `data/` 目录对应的 Markdown 片段，并让模型基于相关片段回答。
+
+## 替换知识库资料
+
+你可以用自己的资料替换 `data/` 目录中的示例文档。
+
+建议步骤：
+
+1. 保留 Markdown 格式。
+2. 将资料放入 `data/` 下的任意子目录。
+3. 每份文档尽量用标题组织内容，例如 `# 文档标题`、`## 小节标题`。
+4. 不要放入真实 API Key、身份证、手机号、未脱敏简历或公司内部资料。
+5. 替换后重新运行：
+
+```powershell
+python .\src\build_index.py
+```
+
+6. 再运行问答程序：
+
+```powershell
+python .\src\main.py
+```
+
+当前仓库内置资料均为模拟示例数据，不代表实时招聘市场，也不构成职业、医疗、金融或法律建议。
 
 ## RAG 流程
 
@@ -109,6 +137,7 @@ python .\src\main.py
 
 - 仅为学习 Demo，不是生产系统。
 - 当前只读取 `data/` 目录下的 Markdown 示例文档。
+- 内置岗位和行业资料为模拟示例，不代表实时招聘市场。
 - 当前使用 Qdrant 本地文件模式，不是 Docker 或云端服务。
 - 文档变更后需要重新运行 `build_index.py` 更新向量索引。
 - Embedding 和 Chat API 调用依赖硅基流动服务状态和账号权限。
@@ -121,4 +150,5 @@ python .\src\main.py
 - 增加 metadata 过滤，例如按文档类型检索岗位、项目或学习笔记。
 - 增加索引增量更新，避免每次重建全部向量。
 - 增加检索评估和重排序。
+- 增加 Streamlit 可视化界面，支持问题输入、答案展示、引用来源展示和资料替换说明。
 - 扩展为简历、项目和岗位 JD 的知识库问答助手。

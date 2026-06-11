@@ -26,21 +26,22 @@ def get_api_key() -> str:
     return api_key.strip()
 
 
-def load_document(path: Path) -> tuple[str, str]:
+def load_document(path: Path, base_dir: Path) -> tuple[str, str]:
     if not path.exists():
         raise RuntimeError(f"文档不存在：{path}")
-    return path.name, path.read_text(encoding="utf-8")
+    source_file = path.relative_to(base_dir).as_posix()
+    return source_file, path.read_text(encoding="utf-8")
 
 
 def load_markdown_documents(data_dir: Path) -> list[tuple[str, str]]:
     if not data_dir.exists():
         raise RuntimeError(f"数据目录不存在：{data_dir}")
 
-    document_paths = sorted(data_dir.glob("*.md"))
+    document_paths = sorted(data_dir.rglob("*.md"))
     if not document_paths:
         raise RuntimeError(f"数据目录中没有 Markdown 文档：{data_dir}")
 
-    return [load_document(path) for path in document_paths]
+    return [load_document(path, data_dir) for path in document_paths]
 
 
 def split_markdown_sections(source_file: str, text: str) -> list[dict]:
