@@ -6,6 +6,8 @@ import {
   GraduationCap,
   Library,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Send,
   Trash2,
@@ -49,22 +51,22 @@ const navItems: NavItem[] = [
 const categoryMeta: Record<CategoryKey, { title: string; description: string; uploadText: string }> = {
   resumes: {
     title: "简历库",
-    description: "管理本地私有简历。支持上传、查看列表和删除；暂不在线修改 docx/pdf 简历。",
+    description: "简历文件",
     uploadText: "上传简历",
   },
   jobs: {
     title: "岗位资料",
-    description: "管理用户自备岗位 JD。Markdown 可在线编辑，docx/pdf 可删除后重新上传。",
+    description: "岗位 JD",
     uploadText: "上传岗位资料",
   },
   projects: {
     title: "项目资料",
-    description: "管理项目说明和作品集材料。Markdown 可在线编辑。",
+    description: "项目说明",
     uploadText: "上传项目资料",
   },
   notes: {
     title: "学习笔记",
-    description: "管理学习笔记、概念说明和面试表达材料。Markdown 可在线编辑。",
+    description: "知识笔记",
     uploadText: "上传学习笔记",
   },
 };
@@ -78,19 +80,31 @@ const exampleQuestions = [
 
 function App() {
   const [activePage, setActivePage] = useState<PageKey>("ask");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [indexResult, setIndexResult] = useState<IndexResponse | null>(() => loadIndexResult());
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">
-            <Library size={21} />
+          <div className="brand-main">
+            <div className="brand-mark">
+              <Library size={21} />
+            </div>
+            <div className="brand-copy">
+              <div className="brand-title">Local RAG</div>
+              <div className="brand-subtitle">求职资料工作台</div>
+            </div>
           </div>
-          <div>
-            <div className="brand-title">Local RAG</div>
-            <div className="brand-subtitle">求职资料工作台</div>
-          </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={() => setSidebarCollapsed((current) => !current)}
+            aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+            title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
         </div>
         <nav className="nav-list">
           {navItems.map((item) => {
@@ -100,6 +114,7 @@ function App() {
                 key={item.key}
                 className={`nav-item ${activePage === item.key ? "active" : ""}`}
                 onClick={() => setActivePage(item.key)}
+                title={item.label}
               >
                 <Icon size={18} />
                 <span>
@@ -110,9 +125,6 @@ function App() {
             );
           })}
         </nav>
-        <div className="sidebar-note">
-          private_data 不会提交到 GitHub。真实资料会在索引和问答时发送给模型 API。
-        </div>
       </aside>
 
       <main className="workspace">
@@ -152,75 +164,63 @@ function AskPage() {
   }
 
   return (
-    <section className="page">
-      <PageHeader
-        title="问答分析"
-        description="基于已索引的简历、岗位、项目和学习资料生成回答，并展示引用来源。"
-      />
-      <div className="ask-layout">
-        <div className="ask-main">
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <h2>输入问题</h2>
-                <p>问题会先进行向量检索，再交给模型生成答案。</p>
+    <section className="page ask-page">
+      <div className="ask-topline">
+        <h1>问答分析</h1>
+        {response && (
+          <div className="metric-group">
+            <span>检索 {response.retrieval_seconds.toFixed(1)}s</span>
+            <span>生成 {response.generation_seconds.toFixed(1)}s</span>
+          </div>
+        )}
+      </div>
+
+      <div className="ai-layout">
+        <div className="chat-column">
+          <section className="chat-surface">
+            {!response && !error && (
+              <div className="welcome-state">
+                <h2>问我关于简历、岗位或项目的问题</h2>
+                <div className="suggestion-chips">
+                  {exampleQuestions.map((item) => (
+                    <button key={item} onClick={() => setQuestion(item)}>
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+            {error && <div className="error-box">{error}</div>}
+            {response && (
+              <article className="assistant-response">
+                <ReactMarkdown>{cleanAnswer(response.answer)}</ReactMarkdown>
+              </article>
+            )}
+            {response?.truncated && (
+              <div className="warning-box">回答可能不完整。可以缩小问题范围后重试。</div>
+            )}
+          </section>
+
+          <section className="composer">
             <textarea
-              className="question-input"
+              className="composer-input"
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="例如：根据我的简历，我更适合哪些岗位？"
+              placeholder="输入问题，按生成回答"
             />
-            <div className="action-row">
+            <div className="composer-actions">
               <button className="primary-button" onClick={submitQuestion} disabled={loading}>
                 {loading ? <Loader2 className="spin" size={17} /> : <Send size={17} />}
                 生成回答
               </button>
             </div>
           </section>
-
-          <section className="panel answer-panel">
-            <div className="panel-heading">
-              <div>
-                <h2>回答</h2>
-                <p>回答区域与输入区域保持同一宽度，便于阅读和核对。</p>
-              </div>
-              {response && (
-                <div className="metric-group">
-                  <span>检索 {response.retrieval_seconds.toFixed(1)}s</span>
-                  <span>生成 {response.generation_seconds.toFixed(1)}s</span>
-                </div>
-              )}
-            </div>
-            {error && <div className="error-box">{error}</div>}
-            {!response && !error && <div className="empty-state">生成答案后会显示在这里。</div>}
-            {response && (
-              <article className="answer-content">
-                <ReactMarkdown>{cleanAnswer(response.answer)}</ReactMarkdown>
-              </article>
-            )}
-            {response?.truncated && (
-              <div className="warning-box">模型返回达到长度上限，当前回答可能不完整。可以缩小问题范围后重试。</div>
-            )}
-          </section>
         </div>
 
-        <aside className="ask-side">
-          <section className="panel compact-panel">
-            <h2>常用问题</h2>
-            <div className="template-list">
-              {exampleQuestions.map((item) => (
-                <button key={item} onClick={() => setQuestion(item)}>
-                  {item}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="panel compact-panel">
-            <h2>引用来源</h2>
-            {!response && <p className="muted-text">回答生成后会列出命中的文档片段。</p>}
+        <aside className="citation-rail">
+          <div className="rail-title">引用</div>
+          {!response && <div className="empty-state compact">暂无引用</div>}
+          <div className="source-list">
             {response?.sources.map((source) => (
               <div className="source-card" key={`${source.source_file}-${source.title}`}>
                 <strong>{source.title}</strong>
@@ -228,7 +228,7 @@ function AskPage() {
                 {source.score !== null && <small>score {source.score.toFixed(4)}</small>}
               </div>
             ))}
-          </section>
+          </div>
         </aside>
       </div>
     </section>
@@ -348,7 +348,7 @@ function DocumentPage({ category }: { category: CategoryKey }) {
           <div className="panel-heading">
             <div>
               <h2>文档列表</h2>
-              <p>{privateDocuments.length} 个私有文档，{publicDocuments.length} 个公开示例文档</p>
+              <p>{privateDocuments.length} 私有 · {publicDocuments.length} 示例</p>
             </div>
           </div>
           {documents.length === 0 && <div className="empty-state">当前分类还没有文档。</div>}
@@ -375,12 +375,9 @@ function DocumentPage({ category }: { category: CategoryKey }) {
           <div className="panel-heading">
             <div>
               <h2>文档内容</h2>
-              <p>私有 Markdown 可在线编辑；公开示例资料只读。</p>
             </div>
             {selected?.editable && (
-              <button className="primary-button small" onClick={handleSave}>
-                保存修改
-              </button>
+              <button className="primary-button small" onClick={handleSave}>保存</button>
             )}
           </div>
           <div className="editor-body">
@@ -389,7 +386,7 @@ function DocumentPage({ category }: { category: CategoryKey }) {
               <div className="empty-state">
                 <strong>{selected.name}</strong>
                 <span>
-                  {selected.source === "public" ? "该公开示例格式暂不支持在线预览。" : "该文件格式暂不支持在线编辑。"}
+                {selected.source === "public" ? "暂不支持预览。" : "暂不支持编辑。"}
                 </span>
               </div>
             )}
@@ -513,7 +510,7 @@ function IndexPage({
 
   return (
     <section className="page">
-      <PageHeader title="索引状态" description="资料变更后更新 Qdrant 本地向量索引。未变化文档会被跳过。" />
+      <PageHeader title="索引状态" />
       <div className="index-actions">
         <button className="primary-button" onClick={handleBuildIndex} disabled={loading}>
           {loading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
@@ -533,10 +530,9 @@ function IndexPage({
         <div className="panel-heading">
           <div>
             <h2>索引日志</h2>
-            <p>用于确认哪些文档被重新处理。</p>
           </div>
         </div>
-        {!result && <div className="empty-state">点击“更新索引”后显示结果。</div>}
+        {!result && <div className="empty-state">暂无索引结果。</div>}
         {result && (
           <div className="log-list">
             <p>collection：{result.collection_name}</p>
@@ -551,12 +547,12 @@ function IndexPage({
   );
 }
 
-function PageHeader({ title, description }: { title: string; description: string }) {
+function PageHeader({ title, description }: { title: string; description?: string }) {
   return (
     <header className="page-header">
       <div>
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
       </div>
     </header>
   );
