@@ -15,7 +15,12 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 COLLECTION_NAME = "local_rag_sections"
 VECTOR_SIZE = 1024
 REQUEST_TIMEOUT = 90
+DEFAULT_TOP_K = 4
+CAREER_ANALYSIS_CANDIDATE_K = 20
+CAREER_ANALYSIS_TOP_K = 8
+MAX_SECTION_CHARS = 700
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+PRIVATE_DATA_DIR = Path(__file__).resolve().parent.parent / "private_data"
 QDRANT_PATH = Path(__file__).resolve().parent.parent / "qdrant_storage"
 
 
@@ -24,24 +29,6 @@ def get_api_key() -> str:
     if not api_key:
         raise RuntimeError("未找到 SILICONFLOW_API_KEY，请先配置环境变量。")
     return api_key.strip()
-
-
-def load_document(path: Path, base_dir: Path) -> tuple[str, str]:
-    if not path.exists():
-        raise RuntimeError(f"文档不存在：{path}")
-    source_file = path.relative_to(base_dir).as_posix()
-    return source_file, path.read_text(encoding="utf-8")
-
-
-def load_markdown_documents(data_dir: Path) -> list[tuple[str, str]]:
-    if not data_dir.exists():
-        raise RuntimeError(f"数据目录不存在：{data_dir}")
-
-    document_paths = sorted(data_dir.rglob("*.md"))
-    if not document_paths:
-        raise RuntimeError(f"数据目录中没有 Markdown 文档：{data_dir}")
-
-    return [load_document(path, data_dir) for path in document_paths]
 
 
 def split_markdown_sections(source_file: str, text: str) -> list[dict]:
@@ -184,7 +171,7 @@ def build_rag_prompt(question: str, sections: list[dict]) -> str:
         (
             f"来源文件：{section['source_file']}\n"
             f"来源标题：{section['title']}\n"
-            f"内容：\n{section['content']}"
+            f"内容：\n{truncate_text(section['content'])}"
         )
         for section in sections
     )
@@ -202,6 +189,12 @@ def build_rag_prompt(question: str, sections: list[dict]) -> str:
 用户问题：
 {question}
 """
+
+
+def truncate_text(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n...（内容已截断）"
 
 
 def ask_model(api_key: str, prompt: str) -> str:
@@ -266,7 +259,7 @@ def create_embedding(api_key: str, text: str) -> list[float]:
     return embedding
 
 
-def search_qdrant(query_vector: list[float], top_k: int = 4) -> list[dict]:
+def search_qdrant(query_vector: list[float], top_k: int = DEFAULT_TOP_K) -> list[dict]:
     client = QdrantClient(path=str(QDRANT_PATH))
     if not client.collection_exists(COLLECTION_NAME):
         raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
@@ -292,6 +285,47 @@ def search_qdrant(query_vector: list[float], top_k: int = 4) -> list[dict]:
     return sections
 
 
+def is_career_analysis_question(question: str) -> bool:
+    keywords = ["简历", "适合", "岗位", "匹配", "修改", "优化", "求职"]
+    return any(keyword in question for keyword in keywords)
+
+
+def select_sections_for_question(question: str, candidates: list[dict]) -> list[dict]:
+    if not is_career_analysis_question(question):
+        return candidates[:DEFAULT_TOP_K]
+
+    selected = []
+    selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=3))
+    selected.extend(take_sections_by_prefix(candidates, "job_descriptions/", limit=4))
+
+    if "项目" in question or "经历" in question:
+        selected.extend(take_sections_by_prefix(candidates, "projects/", limit=2))
+
+    return dedupe_sections(selected)[:CAREER_ANALYSIS_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+
+def take_sections_by_prefix(sections: list[dict], source_prefix: str, limit: int) -> list[dict]:
+    matched_sections = []
+    for section in sections:
+        if section["source_file"].startswith(source_prefix):
+            matched_sections.append(section)
+        if len(matched_sections) >= limit:
+            break
+    return matched_sections
+
+
+def dedupe_sections(sections: list[dict]) -> list[dict]:
+    seen = set()
+    deduped = []
+    for section in sections:
+        key = (section["source_file"], section["title"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(section)
+    return deduped
+
+
 def main() -> int:
     try:
         api_key = get_api_key()
@@ -310,7 +344,9 @@ def main() -> int:
     try:
         print("正在生成问题向量...")
         query_vector = create_embedding(api_key, question)
-        retrieved_sections = search_qdrant(query_vector)
+        candidate_k = CAREER_ANALYSIS_CANDIDATE_K if is_career_analysis_question(question) else DEFAULT_TOP_K
+        candidate_sections = search_qdrant(query_vector, top_k=candidate_k)
+        retrieved_sections = select_sections_for_question(question, candidate_sections)
         if not retrieved_sections:
             print("未检索到相关片段，请换一种问法。")
             return 1

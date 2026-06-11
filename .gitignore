@@ -1,6 +1,7 @@
 .env
 .venv/
 qdrant_storage/
+private_data/
 __pycache__/
 *.py[cod]
 .pytest_cache/

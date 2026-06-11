@@ -38,6 +38,7 @@ local-rag-assistant/
     job_descriptions/
     learning_notes/
     projects/
+  private_data/          # 本地私有资料，不提交，支持 .md/.docx/.pdf
   qdrant_storage/        # 本地生成，不提交
   src/
     build_index.py
@@ -101,9 +102,9 @@ Java 后端和 AI 应用开发有哪些结合点？
 
 建议步骤：
 
-1. 保留 Markdown 格式。
+1. 公开示例资料建议使用 Markdown。
 2. 将资料放入 `data/` 下的任意子目录。
-3. 每份文档尽量用标题组织内容，例如 `# 文档标题`、`## 小节标题`。
+3. Markdown 文档尽量用标题组织内容，例如 `# 文档标题`、`## 小节标题`。
 4. 不要放入真实 API Key、身份证、手机号、未脱敏简历或公司内部资料。
 5. 替换后重新运行：
 
@@ -118,6 +119,60 @@ python .\src\main.py
 ```
 
 当前仓库内置资料均为模拟示例数据，不代表实时招聘市场，也不构成职业、医疗、金融或法律建议。
+
+`build_index.py` 使用增量索引：
+
+- 新增文档会生成新的向量并写入 Qdrant。
+- 内容发生变化的文档会重新生成向量。
+- 没有变化的文档会跳过，不重复调用 Embedding API。
+- 已删除的文档会从 Qdrant 中删除对应片段。
+- 如果删除 `qdrant_storage/`，下次运行会重新全量建索引。
+
+## 使用私有资料验证
+
+如果要用自己的简历、真实项目说明或投递岗位 JD 进行验证，请放入：
+
+```text
+private_data/
+```
+
+例如：
+
+```text
+private_data/
+  resume.docx
+  target_job.md
+  offer.pdf
+  project_notes.md
+```
+
+`private_data/` 已加入 `.gitignore`，不会提交到 GitHub。
+
+`private_data/` 支持以下格式：
+
+```text
+.md
+.docx
+.pdf
+```
+
+注意：
+
+- 不要把真实简历放入 `data/`，避免误提交。
+- 真实简历、岗位 JD 和项目资料在建索引和问答时会发送给硅基流动 API。
+- 如果不希望第三方 API 处理真实隐私内容，请先脱敏，或暂时不要使用真实资料。
+- 修改 `private_data/` 后需要重新运行 `build_index.py`。
+- PDF 文本提取质量取决于文件本身，如果是扫描件，当前版本无法 OCR 识别。
+- Word 文档会尽量保留标题层级，便于按小节切分。
+
+可以测试的问题：
+
+```text
+根据我的简历，我更适合哪些岗位？
+针对 AI 应用开发工程师岗位，我的简历应该怎么修改？
+我的项目经历和 Java 后端岗位有哪些匹配点？
+我的简历里有哪些能力表达不够清楚？
+```
 
 ## RAG 流程
 
@@ -136,11 +191,13 @@ python .\src\main.py
 ## 局限性
 
 - 仅为学习 Demo，不是生产系统。
-- 当前只读取 `data/` 目录下的 Markdown 示例文档。
+- 当前读取 `data/` 和 `private_data/` 下的 `.md`、`.docx`、`.pdf` 文档。
 - 内置岗位和行业资料为模拟示例，不代表实时招聘市场。
+- PDF 扫描件暂不支持 OCR。
 - 当前使用 Qdrant 本地文件模式，不是 Docker 或云端服务。
-- 文档变更后需要重新运行 `build_index.py` 更新向量索引。
+- 文档变更后需要重新运行 `build_index.py` 更新向量索引；未变更文档会被跳过。
 - Embedding 和 Chat API 调用依赖硅基流动服务状态和账号权限。
+- 使用 `private_data/` 真实资料时，内容会被发送给模型 API，需要自行评估隐私风险。
 - 未实现多轮对话、权限系统、文件上传或 Web 页面。
 - 模型回答质量受检索片段质量和模型能力影响。
 
