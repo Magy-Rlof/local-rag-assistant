@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class DocumentInfo(BaseModel):
@@ -22,8 +23,14 @@ class UpdateDocumentRequest(BaseModel):
     content: str
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str
+    history: list[ChatMessage] = Field(default_factory=list)
 
 
 class SourceInfo(BaseModel):
@@ -38,6 +45,7 @@ class AskResponse(BaseModel):
     sources: list[SourceInfo]
     retrieval_seconds: float
     generation_seconds: float
+    mode: str
 
 
 class IndexResponse(BaseModel):

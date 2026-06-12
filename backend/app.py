@@ -129,6 +129,6 @@ def ask(request: AskRequest) -> dict:
     if not question:
         raise HTTPException(status_code=400, detail="问题不能为空。")
     try:
-        return ask_with_rag(question)
+        return ask_with_rag(question, [message.model_dump() for message in request.history])
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

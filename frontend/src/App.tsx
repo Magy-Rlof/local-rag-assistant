@@ -19,6 +19,7 @@ import ReactMarkdown from "react-markdown";
 import {
   AskResponse,
   CategoryKey,
+  ChatMessage,
   DocumentInfo,
   IndexResponse,
   askQuestion,
@@ -37,6 +38,13 @@ type NavItem = {
   label: string;
   description: string;
   icon: LucideIcon;
+};
+
+type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  response?: AskResponse;
 };
 
 const navItems: NavItem[] = [
@@ -141,9 +149,11 @@ function App() {
 
 function AskPage() {
   const [question, setQuestion] = useState(exampleQuestions[0]);
-  const [response, setResponse] = useState<AskResponse | null>(null);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
+  const latestResponse = latestAssistantMessage?.response;
 
   async function submitQuestion() {
     const trimmedQuestion = question.trim();
@@ -154,8 +164,25 @@ function AskPage() {
 
     setLoading(true);
     setError("");
+    const userMessage: ConversationMessage = {
+      id: createMessageId(),
+      role: "user",
+      content: trimmedQuestion,
+    };
+    const history: ChatMessage[] = messages
+      .map((message) => ({ role: message.role, content: message.content }))
+      .slice(-8);
+    setMessages((currentMessages) => [...currentMessages, userMessage]);
+    setQuestion("");
     try {
-      setResponse(await askQuestion(trimmedQuestion));
+      const nextResponse = await askQuestion(trimmedQuestion, history);
+      const assistantMessage: ConversationMessage = {
+        id: createMessageId(),
+        role: "assistant",
+        content: nextResponse.answer,
+        response: nextResponse,
+      };
+      setMessages((currentMessages) => [...currentMessages, assistantMessage]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "生成回答失败。");
     } finally {
@@ -167,18 +194,29 @@ function AskPage() {
     <section className="page ask-page">
       <div className="ask-topline">
         <h1>问答分析</h1>
-        {response && (
+        <div className="ask-topline-actions">
+        {latestResponse && (
           <div className="metric-group">
-            <span>检索 {response.retrieval_seconds.toFixed(1)}s</span>
-            <span>生成 {response.generation_seconds.toFixed(1)}s</span>
+            <span>{formatMode(latestResponse.mode)}</span>
+            <span>检索 {latestResponse.retrieval_seconds.toFixed(1)}s</span>
+            <span>生成 {latestResponse.generation_seconds.toFixed(1)}s</span>
           </div>
         )}
+        {messages.length > 0 && (
+          <button className="secondary-button small-button" onClick={() => {
+            setMessages([]);
+            setError("");
+          }}>
+            清空对话
+          </button>
+        )}
+        </div>
       </div>
 
       <div className="ai-layout">
         <div className="chat-column">
           <section className="chat-surface">
-            {!response && !error && (
+            {messages.length === 0 && !error && (
               <div className="welcome-state">
                 <h2>问我关于简历、岗位或项目的问题</h2>
                 <div className="suggestion-chips">
@@ -191,13 +229,33 @@ function AskPage() {
               </div>
             )}
             {error && <div className="error-box">{error}</div>}
-            {response && (
-              <article className="assistant-response">
-                <ReactMarkdown>{cleanAnswer(response.answer)}</ReactMarkdown>
-              </article>
-            )}
-            {response?.truncated && (
-              <div className="warning-box">回答可能不完整。可以缩小问题范围后重试。</div>
+            {messages.length > 0 && (
+              <div className="message-list">
+                {messages.map((message) => (
+                  <article className={`chat-message ${message.role}`} key={message.id}>
+                    <div className="message-role">{message.role === "user" ? "你" : "助手"}</div>
+                    <div className="message-bubble">
+                      {message.role === "assistant" ? (
+                        <ReactMarkdown>{cleanAnswer(message.content)}</ReactMarkdown>
+                      ) : (
+                        <p>{message.content}</p>
+                      )}
+                      {message.response?.truncated && (
+                        <div className="warning-box compact-alert">回答可能不完整。可以缩小问题范围后重试。</div>
+                      )}
+                    </div>
+                  </article>
+                ))}
+                {loading && (
+                  <article className="chat-message assistant">
+                    <div className="message-role">助手</div>
+                    <div className="message-bubble pending-message">
+                      <Loader2 className="spin" size={17} />
+                      正在生成回答...
+                    </div>
+                  </article>
+                )}
+              </div>
             )}
           </section>
 
@@ -207,6 +265,7 @@ function AskPage() {
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               placeholder="输入问题，按生成回答"
+              disabled={loading}
             />
             <div className="composer-actions">
               <button className="primary-button" onClick={submitQuestion} disabled={loading}>
@@ -219,9 +278,9 @@ function AskPage() {
 
         <aside className="citation-rail">
           <div className="rail-title">引用</div>
-          {!response && <div className="empty-state compact">暂无引用</div>}
+          {!latestResponse?.sources.length && <div className="empty-state compact">暂无引用</div>}
           <div className="source-list">
-            {response?.sources.map((source) => (
+            {latestResponse?.sources.map((source) => (
               <div className="source-card" key={`${source.source_file}-${source.title}`}>
                 <strong>{source.title}</strong>
                 <span>{source.source_file}</span>
@@ -566,6 +625,16 @@ function formatSize(size: number) {
 
 function formatDate(value: string) {
   return value.replace("T", " ");
+}
+
+function formatMode(mode: AskResponse["mode"]) {
+  if (mode === "rag") return "资料问答";
+  if (mode === "system") return "系统信息";
+  return "普通对话";
+}
+
+function createMessageId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function cleanAnswer(answer: string) {

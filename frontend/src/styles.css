@@ -296,6 +296,14 @@ textarea:focus-visible {
   line-height: 1.2;
 }
 
+.ask-topline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .ai-layout {
   flex: 1;
   min-height: 0;
@@ -319,6 +327,76 @@ textarea:focus-visible {
   border-radius: 18px;
   padding: 28px;
   box-shadow: var(--shadow-sm);
+}
+
+.message-list {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.chat-message.user {
+  align-items: flex-end;
+}
+
+.chat-message.assistant {
+  align-items: flex-start;
+}
+
+.message-role {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.message-bubble {
+  max-width: min(760px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 15px 17px;
+  line-height: 1.8;
+  color: #202938;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.chat-message.user .message-bubble {
+  color: #ffffff;
+  background: var(--accent-gradient);
+  border-color: transparent;
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.18);
+}
+
+.message-bubble p,
+.message-bubble ul,
+.message-bubble ol {
+  margin: 0 0 12px;
+}
+
+.message-bubble p:last-child,
+.message-bubble ul:last-child,
+.message-bubble ol:last-child {
+  margin-bottom: 0;
+}
+
+.message-bubble ul,
+.message-bubble ol {
+  padding-left: 22px;
+}
+
+.pending-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
 }
 
 .welcome-state {
@@ -599,6 +677,12 @@ textarea:focus-visible {
 
 .primary-button.small {
   min-height: 34px;
+}
+
+.small-button {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 .secondary-button:hover,

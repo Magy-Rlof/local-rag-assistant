@@ -24,6 +24,12 @@ export type AskResponse = {
   sources: SourceInfo[];
   retrieval_seconds: number;
   generation_seconds: number;
+  mode: "rag" | "chat" | "system";
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 export type IndexResponse = {
@@ -44,11 +50,11 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function askQuestion(question: string): Promise<AskResponse> {
+export async function askQuestion(question: string, history: ChatMessage[] = []): Promise<AskResponse> {
   const response = await fetch(`${API_BASE_URL}/api/rag/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question })
+    body: JSON.stringify({ question, history })
   });
   return parseResponse<AskResponse>(response);
 }

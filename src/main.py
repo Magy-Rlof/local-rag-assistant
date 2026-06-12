@@ -167,7 +167,12 @@ def rule_based_boost(question: str, section: dict) -> int:
     return score
 
 
-def build_rag_prompt(question: str, sections: list[dict], include_citations: bool = True) -> str:
+def build_rag_prompt(
+    question: str,
+    sections: list[dict],
+    include_citations: bool = True,
+    history_text: str = "",
+) -> str:
     context = "\n\n".join(
         (
             f"来源文件：{section['source_file']}\n"
@@ -181,6 +186,7 @@ def build_rag_prompt(question: str, sections: list[dict], include_citations: boo
         if include_citations
         else "- 不要在回答正文中列出引用来源，系统会在界面右侧单独展示引用来源"
     )
+    history_block = f"\n对话历史：\n{history_text}\n" if history_text else ""
     return f"""请基于给定资料回答用户问题。
 
 要求：
@@ -188,6 +194,7 @@ def build_rag_prompt(question: str, sections: list[dict], include_citations: boo
 - 如果资料不足，请明确说明“当前资料不足，无法确定”
 {citation_rule}
 - 不要编造资料中没有的信息
+{history_block}
 
 资料：
 {context}
@@ -203,21 +210,16 @@ def truncate_text(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
     return text[:max_chars].rstrip() + "\n...（内容已截断）"
 
 
-def ask_model_result(api_key: str, prompt: str) -> dict:
+def ask_model_messages_result(api_key: str, messages: list[dict], temperature: float = 0.3) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
         "model": CHAT_MODEL,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
+        "messages": messages,
         "max_tokens": CHAT_MAX_TOKENS,
-        "temperature": 0.3,
+        "temperature": temperature,
     }
 
     response = requests.post(CHAT_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
@@ -242,6 +244,18 @@ def ask_model_result(api_key: str, prompt: str) -> dict:
             }
 
     raise RuntimeError(f"无法解析模型返回结果：{data}")
+
+
+def ask_model_result(api_key: str, prompt: str) -> dict:
+    return ask_model_messages_result(
+        api_key,
+        [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+    )
 
 
 def ask_model(api_key: str, prompt: str) -> str:
