@@ -4,6 +4,10 @@ qdrant_storage/
 private_data/
 __pycache__/
 *.py[cod]
+*.log
 .pytest_cache/
+coverage/
+.coverage
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
