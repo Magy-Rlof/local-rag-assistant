@@ -156,6 +156,7 @@ function AskPage() {
   const latestResponse = latestAssistantMessage?.response;
 
   async function submitQuestion() {
+    if (loading) return;
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
       setError("请输入问题。");
@@ -264,13 +265,24 @@ function AskPage() {
               className="composer-input"
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="输入问题，按生成回答"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  submitQuestion();
+                }
+              }}
+              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
               disabled={loading}
             />
             <div className="composer-actions">
-              <button className="primary-button" onClick={submitQuestion} disabled={loading}>
+              <button
+                className="send-button"
+                onClick={submitQuestion}
+                disabled={loading || !question.trim()}
+                aria-label="发送消息"
+                title="发送消息"
+              >
                 {loading ? <Loader2 className="spin" size={17} /> : <Send size={17} />}
-                生成回答
               </button>
             </div>
           </section>
