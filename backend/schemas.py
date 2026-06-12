@@ -23,6 +23,11 @@ class UpdateDocumentRequest(BaseModel):
     content: str
 
 
+class SetCurrentResumeRequest(BaseModel):
+    name: str
+    source: Literal["private", "public"] = "private"
+
+
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str

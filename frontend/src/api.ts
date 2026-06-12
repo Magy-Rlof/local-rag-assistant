@@ -1,6 +1,6 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
-export type CategoryKey = "resumes" | "jobs" | "projects" | "notes";
+export type CategoryKey = "resumes" | "industries" | "jobs" | "projects" | "notes";
 
 export type DocumentInfo = {
   name: string;
@@ -64,18 +64,40 @@ export async function listDocuments(category: CategoryKey): Promise<DocumentInfo
   return parseResponse<DocumentInfo[]>(response);
 }
 
-export async function uploadDocument(category: CategoryKey, file: File): Promise<DocumentInfo> {
+export async function getCurrentResume(): Promise<DocumentInfo | null> {
+  const response = await fetch(`${API_BASE_URL}/api/resumes/current`);
+  return parseResponse<DocumentInfo | null>(response);
+}
+
+export async function setCurrentResume(document: DocumentInfo): Promise<DocumentInfo> {
+  const response = await fetch(`${API_BASE_URL}/api/resumes/current`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: document.name, source: document.source })
+  });
+  return parseResponse<DocumentInfo>(response);
+}
+
+export async function uploadDocument(
+  category: CategoryKey,
+  file: File,
+  source: "private" | "public" = "private"
+): Promise<DocumentInfo> {
   const formData = new FormData();
   formData.append("file", file);
-  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/upload`, {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/upload?source=${source}`, {
     method: "POST",
     body: formData
   });
   return parseResponse<DocumentInfo>(response);
 }
 
-export async function deleteDocument(category: CategoryKey, name: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/${encodeURIComponent(name)}`, {
+export async function deleteDocument(
+  category: CategoryKey,
+  name: string,
+  source: "private" | "public" = "private"
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/${encodeURIComponent(name)}?source=${source}`, {
     method: "DELETE"
   });
   await parseResponse(response);
@@ -89,8 +111,13 @@ export async function readDocument(category: CategoryKey, document: DocumentInfo
   return payload.content;
 }
 
-export async function updateDocument(category: CategoryKey, name: string, content: string): Promise<DocumentInfo> {
-  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/${encodeURIComponent(name)}`, {
+export async function updateDocument(
+  category: CategoryKey,
+  name: string,
+  content: string,
+  source: "private" | "public" = "private"
+): Promise<DocumentInfo> {
+  const response = await fetch(`${API_BASE_URL}/api/documents/${category}/${encodeURIComponent(name)}?source=${source}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content })

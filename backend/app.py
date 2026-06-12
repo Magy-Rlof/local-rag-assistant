@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,9 +16,11 @@ from .document_service import (  # noqa: E402
     CATEGORIES,
     delete_document,
     ensure_category_dirs,
+    get_current_resume,
     list_documents,
     read_markdown_document,
     save_upload,
+    set_current_resume,
     write_markdown_document,
 )
 from .rag_service import ask_with_rag  # noqa: E402
@@ -27,6 +30,7 @@ from .schemas import (  # noqa: E402
     DocumentContent,
     DocumentInfo,
     IndexResponse,
+    SetCurrentResumeRequest,
     UpdateDocumentRequest,
 )
 
@@ -66,9 +70,9 @@ def get_documents(category: str) -> list[dict]:
 
 
 @app.post("/api/documents/{category}/upload", response_model=DocumentInfo)
-def upload_document(category: str, file: UploadFile = File(...)) -> dict:
+def upload_document(category: str, file: UploadFile = File(...), source: str = "private") -> dict:
     try:
-        return save_upload(category, file.filename or "document.md", file.file)
+        return save_upload(category, file.filename or "document.md", file.file, source=source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -85,9 +89,9 @@ def get_document_content(category: str, file_name: str, source: str = "private")
 
 
 @app.put("/api/documents/{category}/{file_name}", response_model=DocumentInfo)
-def update_document_content(category: str, file_name: str, request: UpdateDocumentRequest) -> dict:
+def update_document_content(category: str, file_name: str, request: UpdateDocumentRequest, source: str = "private") -> dict:
     try:
-        return write_markdown_document(category, file_name, request.content)
+        return write_markdown_document(category, file_name, request.content, source=source)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="文件不存在。") from exc
     except ValueError as exc:
@@ -95,12 +99,27 @@ def update_document_content(category: str, file_name: str, request: UpdateDocume
 
 
 @app.delete("/api/documents/{category}/{file_name}")
-def remove_document(category: str, file_name: str) -> dict:
+def remove_document(category: str, file_name: str, source: str = "private") -> dict:
     try:
-        delete_document(category, file_name)
+        delete_document(category, file_name, source=source)
         return {"deleted": True}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="文件不存在。") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/resumes/current", response_model=DocumentInfo | None)
+def get_active_resume() -> dict | None:
+    return get_current_resume()
+
+
+@app.put("/api/resumes/current", response_model=DocumentInfo)
+def set_active_resume(request: SetCurrentResumeRequest) -> dict:
+    try:
+        return set_current_resume(request.name, source=request.source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="简历不存在。") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -119,6 +138,16 @@ def build_vector_index() -> dict:
             "storage_path": result.storage_path,
             "logs": logs,
         }
+    except requests.Timeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Embedding API 请求超时，请稍后重试。新增资料较多时，索引构建可能需要更长时间。",
+        ) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Embedding API 网络请求失败：{exc}",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

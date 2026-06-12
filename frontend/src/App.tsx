@@ -1,9 +1,8 @@
 import {
-  BriefcaseBusiness,
+  CheckCircle2,
+  Database,
   FileSearch,
   FileText,
-  FolderKanban,
-  GraduationCap,
   Library,
   Loader2,
   PanelLeftClose,
@@ -25,13 +24,15 @@ import {
   askQuestion,
   buildIndex,
   deleteDocument,
+  getCurrentResume,
   listDocuments,
   readDocument,
+  setCurrentResume,
   updateDocument,
   uploadDocument,
 } from "./api";
 
-type PageKey = "ask" | CategoryKey | "index";
+type PageKey = "ask" | "resumes" | "library" | "index";
 
 type NavItem = {
   key: PageKey;
@@ -49,10 +50,8 @@ type ConversationMessage = {
 
 const navItems: NavItem[] = [
   { key: "ask", label: "问答分析", description: "简历与岗位匹配", icon: FileSearch },
-  { key: "resumes", label: "简历库", description: "上传与删除简历", icon: FileText },
-  { key: "jobs", label: "岗位资料", description: "JD 文档管理", icon: BriefcaseBusiness },
-  { key: "projects", label: "项目资料", description: "项目说明管理", icon: FolderKanban },
-  { key: "notes", label: "学习笔记", description: "知识笔记管理", icon: GraduationCap },
+  { key: "resumes", label: "简历中心", description: "当前简历管理", icon: FileText },
+  { key: "library", label: "资料库", description: "行业、岗位、项目与笔记", icon: Database },
   { key: "index", label: "索引状态", description: "更新向量索引", icon: RefreshCw },
 ];
 
@@ -61,6 +60,11 @@ const categoryMeta: Record<CategoryKey, { title: string; description: string; up
     title: "简历库",
     description: "简历文件",
     uploadText: "上传简历",
+  },
+  industries: {
+    title: "行业资料",
+    description: "行业知识",
+    uploadText: "上传行业资料",
   },
   jobs: {
     title: "岗位资料",
@@ -85,6 +89,8 @@ const exampleQuestions = [
   "我的项目经历和 Java 后端岗位有哪些匹配点？",
   "岗位资料里提到的核心能力有哪些？",
 ];
+
+const libraryCategories: CategoryKey[] = ["industries", "jobs", "projects", "notes"];
 
 function App() {
   const [activePage, setActivePage] = useState<PageKey>("ask");
@@ -138,9 +144,7 @@ function App() {
       <main className="workspace">
         {activePage === "ask" && <AskPage />}
         {activePage === "resumes" && <DocumentPage category="resumes" />}
-        {activePage === "jobs" && <DocumentPage category="jobs" />}
-        {activePage === "projects" && <DocumentPage category="projects" />}
-        {activePage === "notes" && <DocumentPage category="notes" />}
+        {activePage === "library" && <KnowledgeBasePage />}
         {activePage === "index" && <IndexPage result={indexResult} setResult={setIndexResult} />}
       </main>
     </div>
@@ -148,7 +152,7 @@ function App() {
 }
 
 function AskPage() {
-  const [question, setQuestion] = useState(exampleQuestions[0]);
+  const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -294,8 +298,8 @@ function AskPage() {
           <div className="source-list">
             {latestResponse?.sources.map((source) => (
               <div className="source-card" key={`${source.source_file}-${source.title}`}>
-                <strong>{source.title}</strong>
-                <span>{source.source_file}</span>
+                <strong title={source.title}>{source.title}</strong>
+                <span title={source.source_file}>{source.source_file}</span>
                 {source.score !== null && <small>score {source.score.toFixed(4)}</small>}
               </div>
             ))}
@@ -306,14 +310,41 @@ function AskPage() {
   );
 }
 
-function DocumentPage({ category }: { category: CategoryKey }) {
+function KnowledgeBasePage() {
+  const [activeCategory, setActiveCategory] = useState<CategoryKey>("industries");
+
+  return (
+    <section className="page library-page">
+      <PageHeader title="资料库" />
+      <div className="category-tabs">
+        {libraryCategories.map((category) => {
+          const meta = categoryMeta[category];
+          return (
+            <button
+              key={category}
+              className={activeCategory === category ? "active" : ""}
+              onClick={() => setActiveCategory(category)}
+            >
+              {meta.title}
+            </button>
+          );
+        })}
+      </div>
+      <DocumentPage category={activeCategory} embedded />
+    </section>
+  );
+}
+
+function DocumentPage({ category, embedded = false }: { category: CategoryKey; embedded?: boolean }) {
   const meta = categoryMeta[category];
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [selected, setSelected] = useState<DocumentInfo | null>(null);
+  const [currentResume, setCurrentResumeState] = useState<DocumentInfo | null>(null);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [uploadSource, setUploadSource] = useState<"private" | "public">("private");
   const privateDocuments = documents.filter((documentInfo) => documentInfo.source === "private");
   const publicDocuments = documents.filter((documentInfo) => documentInfo.source === "public");
 
@@ -323,15 +354,36 @@ function DocumentPage({ category }: { category: CategoryKey }) {
     setContent("");
   }, [category]);
 
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(""), 2800);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
   async function refreshDocuments() {
     setLoading(true);
     setError("");
     try {
       setDocuments(await listDocuments(category));
+      if (category === "resumes") {
+        setCurrentResumeState(await getCurrentResume());
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "读取文档列表失败。");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSetCurrentResume(documentInfo: DocumentInfo) {
+    setMessage("");
+    setError("");
+    try {
+      const nextCurrentResume = await setCurrentResume(documentInfo);
+      setCurrentResumeState(nextCurrentResume);
+      setMessage("已设为当前简历。简历分析会优先使用这份资料。");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "设置当前简历失败。");
     }
   }
 
@@ -341,7 +393,7 @@ function DocumentPage({ category }: { category: CategoryKey }) {
     setMessage("");
     setError("");
     try {
-      await uploadDocument(category, file);
+      await uploadDocument(category, file, uploadSource);
       await refreshDocuments();
       setMessage("上传成功。请到索引状态页更新向量索引。");
     } catch (requestError) {
@@ -357,7 +409,7 @@ function DocumentPage({ category }: { category: CategoryKey }) {
     setMessage("");
     setError("");
     try {
-      await deleteDocument(category, documentInfo.name);
+      await deleteDocument(category, documentInfo.name, documentInfo.source);
       if (selected?.name === documentInfo.name) {
         setSelected(null);
         setContent("");
@@ -389,7 +441,7 @@ function DocumentPage({ category }: { category: CategoryKey }) {
     setMessage("");
     setError("");
     try {
-      await updateDocument(category, selected.name, content);
+      await updateDocument(category, selected.name, content, selected.source);
       await refreshDocuments();
       setMessage("已保存。请到索引状态页更新向量索引。");
     } catch (requestError) {
@@ -398,9 +450,16 @@ function DocumentPage({ category }: { category: CategoryKey }) {
   }
 
   return (
-    <section className="page document-page">
-      <PageHeader title={meta.title} description={meta.description} />
+    <section className={embedded ? "document-page embedded-document-page" : "page document-page"}>
+      {!embedded && <PageHeader title={meta.title} description={meta.description} />}
       <div className="document-toolbar">
+        <label className="source-select">
+          <span>上传到</span>
+          <select value={uploadSource} onChange={(event) => setUploadSource(event.target.value as "private" | "public")}>
+            <option value="private">本地私有资料</option>
+            <option value="public">公开示例资料</option>
+          </select>
+        </label>
         <label className="upload-button">
           <Upload size={17} />
           {meta.uploadText}
@@ -411,7 +470,14 @@ function DocumentPage({ category }: { category: CategoryKey }) {
           刷新列表
         </button>
       </div>
-      {message && <div className="success-box compact-alert">{message}</div>}
+      {message && (
+        <div className="toast-stack" role="status" aria-live="polite">
+          <div className="toast-message">
+            <CheckCircle2 size={16} />
+            <span>{message}</span>
+          </div>
+        </div>
+      )}
       {error && <div className="error-box compact-alert">{error}</div>}
 
       <div className="document-layout">
@@ -422,22 +488,31 @@ function DocumentPage({ category }: { category: CategoryKey }) {
               <p>{privateDocuments.length} 私有 · {publicDocuments.length} 示例</p>
             </div>
           </div>
+          {category === "resumes" && currentResume && (
+            <div className="current-resume-card" title={currentResume.name}>
+              <CheckCircle2 size={16} />
+              <span>当前简历：{currentResume.name}</span>
+            </div>
+          )}
           {documents.length === 0 && <div className="empty-state">当前分类还没有文档。</div>}
           <div className="document-list-scroll">
             <DocumentGroup
               title="本地私有资料"
               documents={privateDocuments}
               selected={selected}
+              currentDocument={category === "resumes" ? currentResume : null}
               onSelect={handleSelect}
               onDelete={handleDelete}
+              onSetCurrent={category === "resumes" ? handleSetCurrentResume : undefined}
             />
             <DocumentGroup
               title="公开示例资料"
               documents={publicDocuments}
               selected={selected}
+              currentDocument={category === "resumes" ? currentResume : null}
               onSelect={handleSelect}
               onDelete={handleDelete}
-              readonly
+              onSetCurrent={category === "resumes" ? handleSetCurrentResume : undefined}
             />
           </div>
         </section>
@@ -480,15 +555,19 @@ function DocumentGroup({
   title,
   documents,
   selected,
+  currentDocument,
   onSelect,
   onDelete,
+  onSetCurrent,
   readonly = false,
 }: {
   title: string;
   documents: DocumentInfo[];
   selected: DocumentInfo | null;
+  currentDocument: DocumentInfo | null;
   onSelect: (documentInfo: DocumentInfo) => void;
   onDelete: (documentInfo: DocumentInfo) => void;
+  onSetCurrent?: (documentInfo: DocumentInfo) => void;
   readonly?: boolean;
 }) {
   if (documents.length === 0) {
@@ -504,11 +583,16 @@ function DocumentGroup({
     <div className="document-group">
       <div className="document-group-title">{title}</div>
       <div className="document-list">
-        {documents.map((documentInfo) => (
+        {documents.map((documentInfo) => {
+          const isCurrent =
+            currentDocument?.name === documentInfo.name &&
+            currentDocument?.source === documentInfo.source;
+          return (
           <div
             key={`${documentInfo.source}-${documentInfo.name}`}
             className={`document-row ${
               selected?.name === documentInfo.name && selected?.source === documentInfo.source ? "selected" : ""
+            } ${isCurrent ? "current-document" : ""
             }`}
             onClick={() => onSelect(documentInfo)}
             role="button"
@@ -520,26 +604,46 @@ function DocumentGroup({
               }
             }}
           >
-            <div>
-              <strong>{documentInfo.name}</strong>
+            <div className="document-main">
+              <strong>
+                <span className="document-name" title={documentInfo.name}>{documentInfo.name}</span>
+              </strong>
               <span>
                 {formatSize(documentInfo.size_bytes)} · {formatDate(documentInfo.modified_at)}
               </span>
             </div>
-            {documentInfo.deletable && !readonly && (
-              <button
-                className="icon-button danger"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDelete(documentInfo);
-                }}
-                title="删除文档"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
+            <div className="document-actions">
+              {isCurrent && (
+                <span className="current-text-badge">当前简历</span>
+              )}
+              {onSetCurrent && documentInfo.source === "private" && !isCurrent && (
+                <button
+                  className="text-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSetCurrent(documentInfo);
+                  }}
+                  title="设为当前简历"
+                >
+                  设为当前
+                </button>
+              )}
+              {documentInfo.deletable && !readonly && (
+                <button
+                  className="icon-button danger"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete(documentInfo);
+                  }}
+                  title="删除文档"
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -580,7 +684,7 @@ function IndexPage({
   );
 
   return (
-    <section className="page">
+    <section className="page index-page">
       <PageHeader title="索引状态" />
       <div className="index-actions">
         <button className="primary-button" onClick={handleBuildIndex} disabled={loading}>
@@ -597,7 +701,7 @@ function IndexPage({
           </div>
         ))}
       </div>
-      <section className="panel">
+      <section className="panel index-log-panel">
         <div className="panel-heading">
           <div>
             <h2>索引日志</h2>

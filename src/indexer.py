@@ -148,7 +148,12 @@ def build_index(api_key: str | None = None, log: LogFn | None = None) -> IndexBu
         document_hash = current_hashes[source_file]
         for section_index, section in enumerate(sections_by_source.get(source_file, []), start=1):
             text = build_section_text(section)
-            vector = create_embedding(api_key, text)
+            try:
+                vector = create_embedding(api_key, text)
+            except Exception:
+                if log:
+                    log(f"生成向量失败：{section['source_file']} / {section['title']}")
+                raise
             points.append(
                 PointStruct(
                     id=build_point_id(source_file, section_index, section["title"]),

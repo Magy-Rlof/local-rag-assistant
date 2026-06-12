@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import requests
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 
 CHAT_API_URL = "https://api.siliconflow.cn/v1/chat/completions"
@@ -16,6 +16,8 @@ COLLECTION_NAME = "local_rag_sections"
 VECTOR_SIZE = 1024
 REQUEST_TIMEOUT = 90
 CHAT_MAX_TOKENS = 1400
+EMBEDDING_MAX_ATTEMPTS = 2
+EMBEDDING_RETRY_DELAY_SECONDS = 1.5
 DEFAULT_TOP_K = 4
 CAREER_ANALYSIS_CANDIDATE_K = 20
 CAREER_ANALYSIS_TOP_K = 8
@@ -186,6 +188,7 @@ def build_rag_prompt(
         if include_citations
         else "- 不要在回答正文中列出引用来源，系统会在界面右侧单独展示引用来源"
     )
+    task_rule = build_task_rule(question)
     history_block = f"\n对话历史：\n{history_text}\n" if history_text else ""
     return f"""请基于给定资料回答用户问题。
 
@@ -194,6 +197,7 @@ def build_rag_prompt(
 - 如果资料不足，请明确说明“当前资料不足，无法确定”
 {citation_rule}
 - 不要编造资料中没有的信息
+{task_rule}
 {history_block}
 
 资料：
@@ -202,6 +206,25 @@ def build_rag_prompt(
 用户问题：
 {question}
 """
+
+
+def build_task_rule(question: str) -> str:
+    resume_improvement_keywords = ["优先修改", "哪些地方", "怎么改", "修改简历", "优化简历", "简历修改", "修改哪些"]
+    if any(keyword in question for keyword in resume_improvement_keywords):
+        return (
+            "- 如果用户询问简历修改或优化建议，只要资料中包含当前简历内容，就必须给出有限但可执行的建议，"
+            "不要因为没有完整 JD 就直接回答资料不足\n"
+            "- 简历优化类回答请按“优先修改项 / 修改原因 / 示例表达 / 对应岗位”组织\n"
+            "- 如果岗位资料不足，可以明确说明建议是基于当前简历和已检索到的岗位资料得出的"
+        )
+
+    if any(keyword in question for keyword in ["适合哪些岗位", "适合哪些", "更适合"]):
+        return (
+            "- 岗位推荐类回答请区分“优先推荐 / 可以尝试 / 暂不优先”，并简要说明依据\n"
+            "- 如果资料中包含当前简历，必须以当前简历为主要依据"
+        )
+
+    return ""
 
 
 def truncate_text(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
@@ -273,7 +296,19 @@ def create_embedding(api_key: str, text: str) -> list[float]:
         "encoding_format": "float",
     }
 
-    response = requests.post(EMBEDDING_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+    last_error = None
+    for attempt in range(1, EMBEDDING_MAX_ATTEMPTS + 1):
+        try:
+            response = requests.post(EMBEDDING_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+            break
+        except (requests.Timeout, requests.RequestException) as exc:
+            last_error = exc
+            if attempt >= EMBEDDING_MAX_ATTEMPTS:
+                raise
+            time.sleep(EMBEDDING_RETRY_DELAY_SECONDS)
+    else:
+        raise RuntimeError(f"Embedding API 调用失败：{last_error}")
+
     response.raise_for_status()
     data = response.json()
 
@@ -313,16 +348,67 @@ def search_qdrant(query_vector: list[float], top_k: int = DEFAULT_TOP_K) -> list
     return sections
 
 
+def get_sections_by_source_files(source_files: list[str], limit_per_source: int = 5) -> list[dict]:
+    if not source_files:
+        return []
+
+    client = QdrantClient(path=str(QDRANT_PATH))
+    if not client.collection_exists(COLLECTION_NAME):
+        raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
+
+    sections = []
+    for source_file in source_files:
+        records, _ = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_file",
+                        match=models.MatchValue(value=source_file),
+                    )
+                ]
+            ),
+            limit=limit_per_source,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for record in records:
+            payload = record.payload or {}
+            sections.append(
+                {
+                    "source_file": payload.get("source_file", "unknown"),
+                    "title": payload.get("title", "unknown"),
+                    "content": payload.get("content", ""),
+                    "score": None,
+                }
+            )
+    return sections
+
+
 def is_career_analysis_question(question: str) -> bool:
     keywords = ["简历", "适合", "岗位", "匹配", "修改", "优化", "求职"]
     return any(keyword in question for keyword in keywords)
 
 
-def select_sections_for_question(question: str, candidates: list[dict]) -> list[dict]:
+def select_sections_for_question(
+    question: str,
+    candidates: list[dict],
+    current_resume_sources: list[str] | None = None,
+) -> list[dict]:
     if not is_career_analysis_question(question):
         return candidates[:DEFAULT_TOP_K]
 
     selected = []
+    current_resume_sources = current_resume_sources or []
+
+    if "简历" in question:
+        selected.extend(take_sections_by_exact_sources(candidates, current_resume_sources, limit=5))
+        if not current_resume_sources:
+            selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=4))
+        selected.extend(take_sections_by_prefix(candidates, "job_descriptions/", limit=2))
+        selected.extend(take_sections_by_prefix(candidates, "projects/", limit=2))
+        return dedupe_sections(selected)[:CAREER_ANALYSIS_TOP_K] or candidates[:DEFAULT_TOP_K]
+
     selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=3))
     selected.extend(take_sections_by_prefix(candidates, "job_descriptions/", limit=4))
 
@@ -336,6 +422,20 @@ def take_sections_by_prefix(sections: list[dict], source_prefix: str, limit: int
     matched_sections = []
     for section in sections:
         if section["source_file"].startswith(source_prefix):
+            matched_sections.append(section)
+        if len(matched_sections) >= limit:
+            break
+    return matched_sections
+
+
+def take_sections_by_exact_sources(sections: list[dict], source_files: list[str], limit: int) -> list[dict]:
+    if not source_files:
+        return []
+
+    source_set = set(source_files)
+    matched_sections = []
+    for section in sections:
+        if section["source_file"] in source_set:
             matched_sections.append(section)
         if len(matched_sections) >= limit:
             break
