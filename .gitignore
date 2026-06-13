@@ -11,3 +11,4 @@ coverage/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+rag_quality_multi_report*.md

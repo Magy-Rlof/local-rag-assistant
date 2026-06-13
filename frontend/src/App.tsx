@@ -13,7 +13,7 @@ import {
   Upload,
   type LucideIcon,
 } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   AskResponse,
@@ -21,7 +21,7 @@ import {
   ChatMessage,
   DocumentInfo,
   IndexResponse,
-  askQuestion,
+  askQuestionStream,
   buildIndex,
   deleteDocument,
   getCurrentResume,
@@ -156,8 +156,13 @@ function AskPage() {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const messageEndRef = useRef<HTMLDivElement | null>(null);
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
   const latestResponse = latestAssistantMessage?.response;
+
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages, loading]);
 
   async function submitQuestion() {
     if (loading) return;
@@ -177,19 +182,78 @@ function AskPage() {
     const history: ChatMessage[] = messages
       .map((message) => ({ role: message.role, content: message.content }))
       .slice(-8);
-    setMessages((currentMessages) => [...currentMessages, userMessage]);
+    const assistantMessageId = createMessageId();
+    const assistantMessage: ConversationMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+    };
+    setMessages((currentMessages) => [...currentMessages, userMessage, assistantMessage]);
     setQuestion("");
     try {
-      const nextResponse = await askQuestion(trimmedQuestion, history);
-      const assistantMessage: ConversationMessage = {
-        id: createMessageId(),
-        role: "assistant",
-        content: nextResponse.answer,
-        response: nextResponse,
-      };
-      setMessages((currentMessages) => [...currentMessages, assistantMessage]);
+      const finalResponse = await askQuestionStream(trimmedQuestion, history, {
+        onMeta: (meta) => {
+          setMessages((currentMessages) =>
+            currentMessages.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    response: {
+                      answer: message.content,
+                      truncated: false,
+                      sources: meta.sources,
+                      retrieval_seconds: meta.retrieval_seconds,
+                      generation_seconds: 0,
+                      mode: meta.mode,
+                    },
+                  }
+                : message
+            )
+          );
+        },
+        onDelta: (text) => {
+          setMessages((currentMessages) =>
+            currentMessages.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    content: message.content + text,
+                    response: message.response
+                      ? { ...message.response, answer: message.content + text }
+                      : message.response,
+                  }
+                : message
+            )
+          );
+        },
+        onDone: (nextResponse) => {
+          setMessages((currentMessages) =>
+            currentMessages.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    content: nextResponse.answer,
+                    response: nextResponse,
+                  }
+                : message
+            )
+          );
+        },
+      });
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: finalResponse.answer,
+                response: finalResponse,
+              }
+            : message
+        )
+      );
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "生成回答失败。");
+      setMessages((currentMessages) => currentMessages.filter((message) => message.id !== assistantMessageId));
     } finally {
       setLoading(false);
     }
@@ -241,7 +305,14 @@ function AskPage() {
                     <div className="message-role">{message.role === "user" ? "你" : "助手"}</div>
                     <div className="message-bubble">
                       {message.role === "assistant" ? (
-                        <ReactMarkdown>{cleanAnswer(message.content)}</ReactMarkdown>
+                        message.content ? (
+                          <ReactMarkdown>{cleanAnswer(message.content)}</ReactMarkdown>
+                        ) : loading && message.id === messages[messages.length - 1]?.id ? (
+                          <div className="pending-message">
+                            <Loader2 className="spin" size={17} />
+                            正在生成回答...
+                          </div>
+                        ) : null
                       ) : (
                         <p>{message.content}</p>
                       )}
@@ -251,7 +322,7 @@ function AskPage() {
                     </div>
                   </article>
                 ))}
-                {loading && (
+                {loading && messages[messages.length - 1]?.role !== "assistant" && (
                   <article className="chat-message assistant">
                     <div className="message-role">助手</div>
                     <div className="message-bubble pending-message">
@@ -260,6 +331,7 @@ function AskPage() {
                     </div>
                   </article>
                 )}
+                <div ref={messageEndRef} />
               </div>
             )}
           </section>
@@ -755,8 +827,8 @@ function createMessageId() {
 
 function cleanAnswer(answer: string) {
   return answer
-    .replace(/\n?\s*\*\*引用来源\*\*[:：]?[\s\S]*$/u, "")
-    .replace(/\n?\s*引用来源[:：]?[\s\S]*$/u, "")
+    .replace(/(?:\n|^)\s*(?:#{1,6}\s*)?\*\*引用来源\*\*[:：]?\s*\n[\s\S]*$/u, "")
+    .replace(/(?:\n|^)\s*(?:#{1,6}\s*)?引用来源[:：]?\s*\n[\s\S]*$/u, "")
     .trim();
 }
 

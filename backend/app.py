@@ -4,6 +4,7 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -23,7 +24,7 @@ from .document_service import (  # noqa: E402
     set_current_resume,
     write_markdown_document,
 )
-from .rag_service import ask_with_rag  # noqa: E402
+from .rag_service import ask_with_rag, stream_event, stream_with_rag  # noqa: E402
 from .schemas import (  # noqa: E402
     AskRequest,
     AskResponse,
@@ -159,5 +160,34 @@ def ask(request: AskRequest) -> dict:
         raise HTTPException(status_code=400, detail="问题不能为空。")
     try:
         return ask_with_rag(question, [message.model_dump() for message in request.history])
+    except requests.Timeout as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="模型 API 请求超时，请稍后重试。当前问题可能需要较长生成时间，或模型服务暂时不可用。",
+        ) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"模型 API 网络请求失败：{exc}",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rag/ask/stream")
+def ask_stream(request: AskRequest) -> StreamingResponse:
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="问题不能为空。")
+
+    def generate():
+        try:
+            yield from stream_with_rag(question, [message.model_dump() for message in request.history])
+        except requests.Timeout as exc:
+            yield stream_event("error", {"message": f"模型 API 请求超时：{exc}"})
+        except requests.RequestException as exc:
+            yield stream_event("error", {"message": f"模型 API 网络请求失败：{exc}"})
+        except RuntimeError as exc:
+            yield stream_event("error", {"message": str(exc)})
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")

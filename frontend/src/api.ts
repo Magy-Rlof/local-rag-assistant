@@ -32,6 +32,18 @@ export type ChatMessage = {
   content: string;
 };
 
+export type AskStreamMeta = {
+  sources: SourceInfo[];
+  retrieval_seconds: number;
+  mode: AskResponse["mode"];
+};
+
+export type AskStreamCallbacks = {
+  onMeta?: (meta: AskStreamMeta) => void;
+  onDelta?: (text: string) => void;
+  onDone?: (response: AskResponse) => void;
+};
+
 export type IndexResponse = {
   changed_sources: string[];
   skipped_sources: string[];
@@ -57,6 +69,82 @@ export async function askQuestion(question: string, history: ChatMessage[] = [])
     body: JSON.stringify({ question, history })
   });
   return parseResponse<AskResponse>(response);
+}
+
+export async function askQuestionStream(
+  question: string,
+  history: ChatMessage[] = [],
+  callbacks: AskStreamCallbacks = {}
+): Promise<AskResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/rag/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, history })
+  });
+
+  if (!response.ok || !response.body) {
+    return parseResponse<AskResponse>(response);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: AskResponse | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.event === "meta") {
+        callbacks.onMeta?.({
+          sources: event.sources ?? [],
+          retrieval_seconds: event.retrieval_seconds ?? 0,
+          mode: event.mode ?? "chat",
+        });
+      } else if (event.event === "delta") {
+        callbacks.onDelta?.(event.text ?? "");
+      } else if (event.event === "done") {
+        finalResponse = {
+          answer: event.answer ?? "",
+          truncated: Boolean(event.truncated),
+          sources: event.sources ?? [],
+          retrieval_seconds: event.retrieval_seconds ?? 0,
+          generation_seconds: event.generation_seconds ?? 0,
+          mode: event.mode ?? "chat",
+        };
+        callbacks.onDone?.(finalResponse);
+      } else if (event.event === "error") {
+        throw new Error(event.message || "流式生成失败。");
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer);
+    if (event.event === "done") {
+      finalResponse = {
+        answer: event.answer ?? "",
+        truncated: Boolean(event.truncated),
+        sources: event.sources ?? [],
+        retrieval_seconds: event.retrieval_seconds ?? 0,
+        generation_seconds: event.generation_seconds ?? 0,
+        mode: event.mode ?? "chat",
+      };
+      callbacks.onDone?.(finalResponse);
+    } else if (event.event === "error") {
+      throw new Error(event.message || "流式生成失败。");
+    }
+  }
+
+  if (!finalResponse) {
+    throw new Error("流式生成没有返回完整结果。");
+  }
+  return finalResponse;
 }
 
 export async function listDocuments(category: CategoryKey): Promise<DocumentInfo[]> {

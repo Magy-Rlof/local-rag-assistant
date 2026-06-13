@@ -21,17 +21,64 @@ EMBEDDING_RETRY_DELAY_SECONDS = 1.5
 DEFAULT_TOP_K = 4
 CAREER_ANALYSIS_CANDIDATE_K = 20
 CAREER_ANALYSIS_TOP_K = 8
+JOB_RECOMMENDATION_TOP_K = 18
+RESUME_IMPROVEMENT_TOP_K = 16
+JOB_MATCH_TOP_K = 16
+TECHNICAL_EXPLANATION_TOP_K = 14
+KNOWLEDGE_BASE_GUIDANCE_TOP_K = 14
 MAX_SECTION_CHARS = 700
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PRIVATE_DATA_DIR = Path(__file__).resolve().parent.parent / "private_data"
 QDRANT_PATH = Path(__file__).resolve().parent.parent / "qdrant_storage"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+TARGET_JOB_RECOMMENDATION_SOURCES = [
+    "job_descriptions/ai_application_engineer.md",
+    "job_descriptions/java_backend_engineer.md",
+    "job_descriptions/python_backend_engineer.md",
+    "job_descriptions/industry_software_engineer.md",
+    "job_descriptions/implementation_consultant.md",
+]
+TARGET_RESUME_IMPROVEMENT_SOURCES = [
+    "job_descriptions/ai_application_engineer.md",
+    "projects/local_rag_assistant.md",
+]
+TARGET_JOB_MATCH_SOURCES = [
+    "job_descriptions/ai_application_engineer.md",
+    "projects/local_rag_assistant.md",
+]
+TECHNICAL_EXPLANATION_SOURCES = [
+    "learning_notes/ai_app_frameworks.md",
+    "projects/local_rag_assistant.md",
+]
+KNOWLEDGE_BASE_GUIDANCE_SOURCES = [
+    "learning_notes/knowledge_base_maintenance.md",
+    "projects/local_rag_assistant.md",
+    "learning_notes/rag_basics.md",
+]
 
 
 def get_api_key() -> str:
+    load_local_env()
     api_key = os.getenv("SILICONFLOW_API_KEY")
     if not api_key:
         raise RuntimeError("未找到 SILICONFLOW_API_KEY，请先配置环境变量。")
     return api_key.strip()
+
+
+def load_local_env() -> None:
+    if not ENV_FILE.exists():
+        return
+
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def split_markdown_sections(source_file: str, text: str) -> list[dict]:
@@ -174,6 +221,7 @@ def build_rag_prompt(
     sections: list[dict],
     include_citations: bool = True,
     history_text: str = "",
+    allow_general_knowledge: bool = False,
 ) -> str:
     context = "\n\n".join(
         (
@@ -190,11 +238,16 @@ def build_rag_prompt(
     )
     task_rule = build_task_rule(question)
     history_block = f"\n对话历史：\n{history_text}\n" if history_text else ""
+    knowledge_rule = (
+        "- 先基于资料回答；如果需要解释通用技术概念，可以在“模型通用知识补充”小节中补充，但必须明确这部分不是资料原文\n"
+        "- 不要把模型通用知识伪装成资料中的事实"
+        if allow_general_knowledge
+        else "- 只能使用资料中的信息回答\n- 如果资料不足，请明确说明“当前资料不足，无法确定”"
+    )
     return f"""请基于给定资料回答用户问题。
 
 要求：
-- 只能使用资料中的信息回答
-- 如果资料不足，请明确说明“当前资料不足，无法确定”
+{knowledge_rule}
 {citation_rule}
 - 不要编造资料中没有的信息
 {task_rule}
@@ -390,16 +443,189 @@ def is_career_analysis_question(question: str) -> bool:
     return any(keyword in question for keyword in keywords)
 
 
+def is_job_recommendation_question(question: str) -> bool:
+    keywords = [
+        "适合哪些岗位",
+        "更适合哪些岗位",
+        "推荐岗位",
+        "岗位推荐",
+        "优先推荐",
+        "可以尝试",
+        "暂不优先",
+    ]
+    return any(keyword in question for keyword in keywords)
+
+
+def is_resume_improvement_question(question: str) -> bool:
+    keywords = [
+        "修改简历",
+        "优化简历",
+        "简历应该怎么修改",
+        "简历应该怎么改",
+        "这份简历应该怎么修改",
+        "这份简历应该怎么改",
+        "优先修改项",
+        "修改原因",
+        "示例表达",
+    ]
+    return any(keyword in question for keyword in keywords)
+
+
+def is_job_match_question(question: str) -> bool:
+    keywords = [
+        "匹配点",
+        "有哪些匹配",
+        "项目经历有哪些匹配",
+        "项目经历和",
+        "项目经历与",
+        "岗位有哪些匹配",
+    ]
+    return any(keyword in question for keyword in keywords)
+
+
+def is_technical_explanation_question(question: str) -> bool:
+    framework_keywords = ["Dify", "dify", "LangChain", "langchain", "LlamaIndex", "llamaindex", "手写 RAG", "手写RAG"]
+    comparison_keywords = ["区别", "对比", "有什么不同", "怎么选", "选择建议"]
+    return any(keyword in question for keyword in framework_keywords) and any(
+        keyword in question for keyword in comparison_keywords
+    )
+
+
+def is_knowledge_base_guidance_question(question: str) -> bool:
+    knowledge_keywords = [
+        "知识库",
+        "资料库",
+        "索引",
+        "补充资料",
+        "补充项目资料",
+        "补充知识",
+        "资料不足",
+        "回答资料不足",
+        "事实卡片",
+    ]
+    guidance_keywords = [
+        "怎么补充",
+        "如何补充",
+        "怎么维护",
+        "如何维护",
+        "应该如何",
+        "应该怎么",
+        "更新索引",
+        "包含哪些",
+        "哪些部分",
+        "模板",
+    ]
+    return any(keyword in question for keyword in knowledge_keywords) and any(
+        keyword in question for keyword in guidance_keywords
+    )
+
+
 def select_sections_for_question(
     question: str,
     candidates: list[dict],
     current_resume_sources: list[str] | None = None,
 ) -> list[dict]:
     if not is_career_analysis_question(question):
+        if is_technical_explanation_question(question):
+            selected = take_sections_by_exact_sources(
+                candidates,
+                TECHNICAL_EXPLANATION_SOURCES,
+                limit=TECHNICAL_EXPLANATION_TOP_K,
+            )
+            return dedupe_sections(selected)[:TECHNICAL_EXPLANATION_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+        if is_knowledge_base_guidance_question(question):
+            selected = take_sections_by_exact_sources(
+                candidates,
+                KNOWLEDGE_BASE_GUIDANCE_SOURCES,
+                limit=KNOWLEDGE_BASE_GUIDANCE_TOP_K,
+            )
+            return dedupe_sections(selected)[:KNOWLEDGE_BASE_GUIDANCE_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+        focused_project_sources = get_focused_project_sources(question)
+        if focused_project_sources:
+            focused_sections = take_sections_by_exact_sources(
+                candidates,
+                focused_project_sources,
+                limit=CAREER_ANALYSIS_TOP_K,
+            )
+            if focused_sections:
+                return focused_sections
+
         return candidates[:DEFAULT_TOP_K]
 
     selected = []
     current_resume_sources = current_resume_sources or []
+
+    if is_job_recommendation_question(question):
+        selected.extend(take_sections_by_exact_sources(candidates, current_resume_sources, limit=4))
+        if not current_resume_sources:
+            selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=4))
+        selected.extend(take_sections_by_exact_sources(candidates, ["projects/local_rag_assistant.md"], limit=2))
+        selected.extend(
+            take_sections_by_exact_sources(
+                candidates,
+                TARGET_JOB_RECOMMENDATION_SOURCES,
+                limit=12,
+            )
+        )
+        return dedupe_sections(selected)[:JOB_RECOMMENDATION_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+    if is_resume_improvement_question(question):
+        selected.extend(take_sections_by_exact_sources(candidates, current_resume_sources, limit=5))
+        if not current_resume_sources:
+            selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=4))
+        selected.extend(
+            take_sections_by_exact_sources(
+                candidates,
+                TARGET_RESUME_IMPROVEMENT_SOURCES,
+                limit=10,
+            )
+        )
+        return dedupe_sections(selected)[:RESUME_IMPROVEMENT_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+    if is_job_match_question(question):
+        selected.extend(take_sections_by_exact_sources(candidates, current_resume_sources, limit=5))
+        if not current_resume_sources:
+            selected.extend(take_sections_by_prefix(candidates, "private_data/", limit=4))
+        selected.extend(
+            take_sections_by_exact_sources(
+                candidates,
+                TARGET_JOB_MATCH_SOURCES,
+                limit=10,
+            )
+        )
+        return dedupe_sections(selected)[:JOB_MATCH_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+    if is_technical_explanation_question(question):
+        selected.extend(
+            take_sections_by_exact_sources(
+                candidates,
+                TECHNICAL_EXPLANATION_SOURCES,
+                limit=TECHNICAL_EXPLANATION_TOP_K,
+            )
+        )
+        return dedupe_sections(selected)[:TECHNICAL_EXPLANATION_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+    if is_knowledge_base_guidance_question(question):
+        selected.extend(
+            take_sections_by_exact_sources(
+                candidates,
+                KNOWLEDGE_BASE_GUIDANCE_SOURCES,
+                limit=KNOWLEDGE_BASE_GUIDANCE_TOP_K,
+            )
+        )
+        return dedupe_sections(selected)[:KNOWLEDGE_BASE_GUIDANCE_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+    focused_project_sources = get_focused_project_sources(question)
+    if focused_project_sources:
+        focused_sections = take_sections_by_exact_sources(
+            candidates,
+            focused_project_sources,
+            limit=CAREER_ANALYSIS_TOP_K,
+        )
+        if focused_sections:
+            return focused_sections
 
     if "简历" in question:
         selected.extend(take_sections_by_exact_sources(candidates, current_resume_sources, limit=5))
@@ -416,6 +642,24 @@ def select_sections_for_question(
         selected.extend(take_sections_by_prefix(candidates, "projects/", limit=2))
 
     return dedupe_sections(selected)[:CAREER_ANALYSIS_TOP_K] or candidates[:DEFAULT_TOP_K]
+
+
+def get_focused_project_sources(question: str) -> list[str]:
+    normalized_question = question.lower()
+    project_source_map = {
+        "projects/local_rag_assistant.md": [
+            "local-rag-assistant",
+            "local rag assistant",
+            "local_rag_assistant",
+            "local rag",
+        ],
+    }
+
+    matched_sources = []
+    for source_file, aliases in project_source_map.items():
+        if any(alias in normalized_question for alias in aliases):
+            matched_sources.append(source_file)
+    return matched_sources
 
 
 def take_sections_by_prefix(sections: list[dict], source_prefix: str, limit: int) -> list[dict]:
