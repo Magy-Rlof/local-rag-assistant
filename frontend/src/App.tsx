@@ -51,7 +51,7 @@ type ConversationMessage = {
 const navItems: NavItem[] = [
   { key: "ask", label: "问答分析", description: "简历与岗位匹配", icon: FileSearch },
   { key: "resumes", label: "简历中心", description: "当前简历管理", icon: FileText },
-  { key: "library", label: "资料库", description: "行业、岗位、项目与笔记", icon: Database },
+  { key: "library", label: "资料库", description: "行业、岗位与项目", icon: Database },
   { key: "index", label: "索引状态", description: "更新向量索引", icon: RefreshCw },
 ];
 
@@ -76,11 +76,6 @@ const categoryMeta: Record<CategoryKey, { title: string; description: string; up
     description: "项目说明",
     uploadText: "上传项目资料",
   },
-  notes: {
-    title: "学习笔记",
-    description: "知识笔记",
-    uploadText: "上传学习笔记",
-  },
 };
 
 const exampleQuestions = [
@@ -90,7 +85,7 @@ const exampleQuestions = [
   "岗位资料里提到的核心能力有哪些？",
 ];
 
-const libraryCategories: CategoryKey[] = ["industries", "jobs", "projects", "notes"];
+const libraryCategories: CategoryKey[] = ["industries", "jobs", "projects"];
 
 function App() {
   const [activePage, setActivePage] = useState<PageKey>("ask");

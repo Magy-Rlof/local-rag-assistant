@@ -29,7 +29,6 @@ CATEGORIES = {
     "industries": CategoryConfig("industries", "行业资料", PRIVATE_DATA_DIR / "industries", DATA_DIR / "industries"),
     "jobs": CategoryConfig("jobs", "岗位资料", PRIVATE_DATA_DIR / "job_descriptions", DATA_DIR / "job_descriptions"),
     "projects": CategoryConfig("projects", "项目资料", PRIVATE_DATA_DIR / "projects", DATA_DIR / "projects"),
-    "notes": CategoryConfig("notes", "学习笔记", PRIVATE_DATA_DIR / "learning_notes", DATA_DIR / "learning_notes"),
 }
 
 

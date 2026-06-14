@@ -1,4 +1,5 @@
 import hashlib
+import os
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from main import (
 
 
 LogFn = Callable[[str], None]
+INCLUDE_PUBLIC_SAMPLES_ENV = "LOCAL_RAG_INCLUDE_PUBLIC_SAMPLES"
 
 
 @dataclass
@@ -112,72 +114,89 @@ def group_sections_by_source(sections: list[dict]) -> dict[str, list[dict]]:
     return dict(grouped_sections)
 
 
+def should_include_public_samples() -> bool:
+    return os.getenv(INCLUDE_PUBLIC_SAMPLES_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_index(api_key: str | None = None, log: LogFn | None = None) -> IndexBuildResult:
     if api_key is None:
         api_key = get_api_key()
 
-    documents = load_knowledge_documents(DATA_DIR, PRIVATE_DATA_DIR)
+    include_public_samples = should_include_public_samples()
+    documents = load_knowledge_documents(
+        DATA_DIR,
+        PRIVATE_DATA_DIR,
+        include_public_samples=include_public_samples,
+    )
+    if log:
+        if include_public_samples:
+            log(f"已启用公开示例资料索引：{INCLUDE_PUBLIC_SAMPLES_ENV}=true")
+        else:
+            log(f"默认排除公开示例资料：如需演示，请设置 {INCLUDE_PUBLIC_SAMPLES_ENV}=true 后重建索引")
     sections = split_documents(documents)
     if not sections:
         raise RuntimeError("没有可写入索引的文档片段。")
 
     client = QdrantClient(path=str(QDRANT_PATH))
-    ensure_collection(client)
+    try:
+        ensure_collection(client)
 
-    current_hashes = {source_file: hash_text(text) for source_file, text in documents}
-    indexed_hashes = get_indexed_document_hashes(client)
-    sections_by_source = group_sections_by_source(sections)
+        current_hashes = {source_file: hash_text(text) for source_file, text in documents}
+        indexed_hashes = get_indexed_document_hashes(client)
+        sections_by_source = group_sections_by_source(sections)
 
-    removed_sources = sorted(set(indexed_hashes) - set(current_hashes))
-    changed_sources = [
-        source_file
-        for source_file, document_hash in current_hashes.items()
-        if indexed_hashes.get(source_file) != document_hash
-    ]
-    skipped_sources = sorted(set(current_hashes) - set(changed_sources))
+        removed_sources = sorted(set(indexed_hashes) - set(current_hashes))
+        changed_sources = [
+            source_file
+            for source_file, document_hash in current_hashes.items()
+            if indexed_hashes.get(source_file) != document_hash
+        ]
+        skipped_sources = sorted(set(current_hashes) - set(changed_sources))
 
-    written_points = 0
-    for source_file in removed_sources:
-        delete_document_points(client, source_file)
-        if log:
-            log(f"已删除过期文档索引：{source_file}")
-
-    for source_file in changed_sources:
-        delete_document_points(client, source_file)
-        points = []
-        document_hash = current_hashes[source_file]
-        for section_index, section in enumerate(sections_by_source.get(source_file, []), start=1):
-            text = build_section_text(section)
-            try:
-                vector = create_embedding(api_key, text)
-            except Exception:
-                if log:
-                    log(f"生成向量失败：{section['source_file']} / {section['title']}")
-                raise
-            points.append(
-                PointStruct(
-                    id=build_point_id(source_file, section_index, section["title"]),
-                    vector=vector,
-                    payload={
-                        "source_file": section["source_file"],
-                        "title": section["title"],
-                        "content": section["content"],
-                        "document_hash": document_hash,
-                    },
-                )
-            )
+        written_points = 0
+        for source_file in removed_sources:
+            delete_document_points(client, source_file)
             if log:
-                log(f"已生成向量：{section['source_file']} / {section['title']}")
+                log(f"已删除过期文档索引：{source_file}")
 
-        if points:
-            client.upsert(collection_name=COLLECTION_NAME, wait=True, points=points)
-            written_points += len(points)
+        for source_file in changed_sources:
+            delete_document_points(client, source_file)
+            points = []
+            document_hash = current_hashes[source_file]
+            for section_index, section in enumerate(sections_by_source.get(source_file, []), start=1):
+                text = build_section_text(section)
+                try:
+                    vector = create_embedding(api_key, text)
+                except Exception:
+                    if log:
+                        log(f"生成向量失败：{section['source_file']} / {section['title']}")
+                    raise
+                points.append(
+                    PointStruct(
+                        id=build_point_id(source_file, section_index, section["title"]),
+                        vector=vector,
+                        payload={
+                            "source_file": section["source_file"],
+                            "title": section["title"],
+                            "content": section["content"],
+                            "document_hash": document_hash,
+                        },
+                    )
+                )
+                if log:
+                    log(f"已生成向量：{section['source_file']} / {section['title']}")
 
-    return IndexBuildResult(
-        changed_sources=changed_sources,
-        skipped_sources=skipped_sources,
-        removed_sources=removed_sources,
-        written_points=written_points,
-        collection_name=COLLECTION_NAME,
-        storage_path=str(QDRANT_PATH),
-    )
+            if points:
+                client.upsert(collection_name=COLLECTION_NAME, wait=True, points=points)
+                written_points += len(points)
+
+        return IndexBuildResult(
+            changed_sources=changed_sources,
+            skipped_sources=skipped_sources,
+            removed_sources=removed_sources,
+            written_points=written_points,
+            collection_name=COLLECTION_NAME,
+            storage_path=str(QDRANT_PATH),
+        )
+    finally:
+        client.close()

@@ -1,6 +1,6 @@
 # Local RAG Assistant
 
-Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本地 RAG 应用。它支持上传简历、岗位 JD、行业资料、项目说明和学习笔记，通过 Qdrant 本地向量检索和大模型问答，帮助用户分析适合的岗位方向、简历修改建议和项目经历匹配点。
+Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本地 RAG 应用。它支持上传简历、岗位 JD、行业资料和项目说明，通过 Qdrant 本地向量检索和大模型问答，帮助用户分析适合的岗位方向、简历修改建议和项目经历匹配点。
 
 这个项目重点展示 AI 应用开发中的工程能力：文档加载、文本切分、Embedding、向量数据库、增量索引、RAG 问答、基础任务路由、流式输出、引用来源展示、私有资料管理和 Web 工作台。
 
@@ -10,7 +10,7 @@ Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本
 - 支持公开示例资料和本地私有资料分离管理。
 - 支持简历中心，用户可以设置“当前简历”。
 - 简历分析类问题会优先使用当前简历，避免把示例简历误当成用户本人。
-- 支持行业、岗位、项目和学习笔记资料的上传、删除和 Markdown 编辑。
+- 支持行业、岗位和项目资料的上传、删除和 Markdown 编辑。
 - 使用 `BAAI/bge-m3` 生成文本向量。
 - 使用 Qdrant 本地文件模式保存和检索向量。
 - 支持增量索引，未修改文档不会重复生成 Embedding。
@@ -25,7 +25,7 @@ Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本
 
 ### 问答分析
 
-用于围绕当前简历、岗位资料、项目资料和学习笔记进行多轮问答。
+用于围绕当前简历、岗位资料和项目资料进行多轮问答。
 
 ![问答分析空白页](docs/images/01-ask-empty.png)
 
@@ -43,7 +43,7 @@ Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本
 
 ### 资料库
 
-支持管理行业、岗位、项目和学习笔记资料，Markdown 文档可在线编辑。
+支持管理行业、岗位和项目资料，Markdown 文档可在线编辑。
 
 ![资料库](docs/images/04-knowledge-base.png)
 
@@ -59,7 +59,7 @@ Local RAG Assistant 是一个面向求职资料管理和岗位匹配分析的本
 - 针对目标岗位生成简历修改建议。
 - 分析项目经历和岗位 JD 的匹配点。
 - 查询不同行业的 AI 应用场景。
-- 管理学习笔记、项目说明和岗位资料。
+- 管理项目说明和岗位资料；个人学习笔记保留在 `private_notes/`，不进入资料库索引。
 
 ## 技术栈
 
@@ -93,7 +93,6 @@ local-rag-assistant/
   data/
     industries/          # 公开行业示例资料
     job_descriptions/    # 公开岗位示例资料
-    learning_notes/      # 公开学习笔记
     projects/            # 公开项目示例资料
     resume_samples/      # 公开脱敏简历样例
   frontend/
@@ -102,6 +101,7 @@ local-rag-assistant/
       api.ts             # 前端 API 调用
       styles.css         # 界面样式
   private_data/          # 本地私有资料，不提交到 Git
+  private_notes/         # 本地个人笔记，不提交到 Git，也不进入 RAG 索引
   qdrant_storage/        # 本地向量库，不提交到 Git
   src/
     build_index.py       # 命令行增量索引入口
@@ -180,7 +180,7 @@ http://127.0.0.1:5173
 2. 启动 FastAPI 后端。
 3. 启动 React 前端。
 4. 在“简历中心”上传简历，并设置当前简历。
-5. 在“资料库”上传或编辑行业、岗位、项目和学习笔记资料。
+5. 在“资料库”上传或编辑行业、岗位和项目资料。
 6. 在“索引状态”中点击“更新索引”。
 7. 在“问答分析”中提问。
 
@@ -198,7 +198,7 @@ http://127.0.0.1:5173
 
 - 问答分析：进行普通对话、RAG 问答和多轮追问。
 - 简历中心：上传简历、删除简历、设置当前简历。
-- 资料库：管理行业资料、岗位资料、项目资料和学习笔记。
+- 资料库：管理行业资料、岗位资料和项目资料。
 - 索引状态：更新 Qdrant 本地向量索引，查看索引日志。
 
 ## 当前简历机制
@@ -213,13 +213,12 @@ http://127.0.0.1:5173
 
 ## 资料目录
 
-公开示例资料放在 `data/` 下，适合提交到 GitHub。真实个人资料放在 `private_data/` 下，不会提交到 Git。
+公开示例资料放在 `data/` 下，适合提交到 GitHub。真实个人资料放在 `private_data/` 下，不会提交到 Git。个人学习笔记放在 `private_notes/` 下，仅供本地查看，不提交到 Git，也不进入 RAG 索引。
 
 ```text
 data/
   industries/
   job_descriptions/
-  learning_notes/
   projects/
   resume_samples/
 
@@ -228,7 +227,10 @@ private_data/
   industries/
   job_descriptions/
   projects/
+
+private_notes/
   learning_notes/
+  projects/
 ```
 
 建议公开资料优先使用 Markdown，并用标题组织内容，例如：
@@ -258,6 +260,7 @@ private_data/
 ## 隐私说明
 
 - `private_data/` 已加入 `.gitignore`，不会提交到 GitHub。
+- `private_notes/` 已加入 `.gitignore`，用于个人学习笔记，不会提交到 GitHub，也不进入 RAG 索引。
 - `qdrant_storage/` 已加入 `.gitignore`，不会提交到 GitHub。
 - `.env` 已加入 `.gitignore`，不要提交真实 API Key。
 - 真实资料在建索引和问答时会发送给模型 API。

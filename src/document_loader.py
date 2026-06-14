@@ -7,9 +7,15 @@ from pypdf import PdfReader
 SUPPORTED_SUFFIXES = {".md", ".docx", ".pdf"}
 
 
-def load_knowledge_documents(data_dir: Path, private_data_dir: Path) -> list[tuple[str, str]]:
+def load_knowledge_documents(
+    data_dir: Path,
+    private_data_dir: Path,
+    *,
+    include_public_samples: bool = False,
+) -> list[tuple[str, str]]:
     documents = []
-    documents.extend(load_documents_from_dir(data_dir, source_prefix=""))
+    if include_public_samples:
+        documents.extend(load_documents_from_dir(data_dir, source_prefix=""))
 
     if private_data_dir.exists():
         documents.extend(load_documents_from_dir(private_data_dir, source_prefix="private_data"))

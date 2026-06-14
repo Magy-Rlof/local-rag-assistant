@@ -626,7 +626,6 @@ def should_use_rag(
         "JD",
         "项目经历",
         "项目资料",
-        "学习笔记",
         "资料里",
         "文档里",
         "项目资料",
@@ -684,7 +683,7 @@ def answer_library_overview_question(question: str, history: list[dict]) -> str:
         lines.append(format_category_summary(category_key, config.label))
 
     lines.append("另外，公开示例资料主要存放在 data/ 目录，真实个人资料建议放在 private_data/ 目录。")
-    lines.append("你可以继续追问某一类资料，例如“简历”“岗位资料”“项目资料”或“学习笔记”。")
+    lines.append("你可以继续追问某一类资料，例如“简历”“岗位资料”或“项目资料”。")
     return "\n".join(lines)
 
 
@@ -693,7 +692,7 @@ def is_library_overview_question(question: str, history: list[dict]) -> bool:
     if any(keyword in question for keyword in overview_keywords):
         return True
 
-    focused_keywords = ["简历", "岗位", "项目", "学习笔记", "笔记", "行业"]
+    focused_keywords = ["简历", "岗位", "项目", "行业"]
     if question.strip() in focused_keywords:
         if len(question.strip()) <= 8:
             return True
@@ -713,7 +712,6 @@ def get_focused_overview_category(question: str, history: list[dict]) -> str:
         "industries": ["行业", "行业资料"],
         "jobs": ["岗位", "岗位资料", "jd", "JD"],
         "projects": ["项目", "项目资料"],
-        "notes": ["学习笔记", "笔记"],
     }
     for category_key, keywords in category_keywords.items():
         if any(keyword in question for keyword in keywords):

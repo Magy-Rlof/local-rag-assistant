@@ -76,16 +76,9 @@ JOB_MATCH_SOURCES = (
     LOCAL_RAG_ASSISTANT_SOURCE,
 )
 
-TECHNICAL_EXPLANATION_SOURCES = (
-    "learning_notes/ai_app_frameworks.md",
-    LOCAL_RAG_ASSISTANT_SOURCE,
-)
+TECHNICAL_EXPLANATION_SOURCES = ()
 
-KNOWLEDGE_BASE_GUIDANCE_SOURCES = (
-    "learning_notes/knowledge_base_maintenance.md",
-    LOCAL_RAG_ASSISTANT_SOURCE,
-    "learning_notes/rag_basics.md",
-)
+KNOWLEDGE_BASE_GUIDANCE_SOURCES = ()
 
 
 def detect_task_type(question: str, history: list[dict] | None = None) -> TaskType:
@@ -188,7 +181,7 @@ def build_context_plan(task_type: TaskType, state: ConversationState) -> Context
         forced_groups.append(ForcedSourceGroup("resume_target_context", RESUME_IMPROVEMENT_SOURCES, 5))
 
     elif task_type == TaskType.TECHNICAL_EXPLANATION:
-        forced_groups.append(ForcedSourceGroup("framework_notes", TECHNICAL_EXPLANATION_SOURCES, 10))
+        forced_groups.append(ForcedSourceGroup("technical_context", TECHNICAL_EXPLANATION_SOURCES, 10))
 
     elif task_type == TaskType.KNOWLEDGE_BASE_GUIDANCE:
         forced_groups.append(ForcedSourceGroup("knowledge_base_guidance", KNOWLEDGE_BASE_GUIDANCE_SOURCES, 10))

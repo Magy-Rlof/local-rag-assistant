@@ -2,6 +2,7 @@
 .venv/
 qdrant_storage/
 private_data/
+private_notes/
 __pycache__/
 *.py[cod]
 *.log

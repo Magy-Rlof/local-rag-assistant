@@ -47,15 +47,8 @@ TARGET_JOB_MATCH_SOURCES = [
     "job_descriptions/ai_application_engineer.md",
     "projects/local_rag_assistant.md",
 ]
-TECHNICAL_EXPLANATION_SOURCES = [
-    "learning_notes/ai_app_frameworks.md",
-    "projects/local_rag_assistant.md",
-]
-KNOWLEDGE_BASE_GUIDANCE_SOURCES = [
-    "learning_notes/knowledge_base_maintenance.md",
-    "projects/local_rag_assistant.md",
-    "learning_notes/rag_basics.md",
-]
+TECHNICAL_EXPLANATION_SOURCES = []
+KNOWLEDGE_BASE_GUIDANCE_SOURCES = []
 
 
 def get_api_key() -> str:
@@ -161,10 +154,6 @@ def select_required_sources(question: str, scored_sections: list[tuple[int, dict
         selected.extend(take_by_source(scored_sections, "job_description", limit=2))
         return dedupe_sections(selected)[:top_k]
 
-    if any(keyword in question for keyword in ["学习", "笔记"]):
-        selected = take_by_source(scored_sections, "learning_note", limit=top_k)
-        return selected[:top_k]
-
     return []
 
 
@@ -199,10 +188,6 @@ def rule_based_boost(question: str, section: dict) -> int:
         if "job_description" in source_file:
             score += 3
         if any(keyword in title for keyword in ["能力要求", "主要职责", "加分项", "岗位定位"]):
-            score += 3
-
-    if any(keyword in question for keyword in ["学习", "笔记", "API", "RAG", "Prompt", "结构化", "Tool"]):
-        if "learning_note" in source_file:
             score += 3
 
     if any(keyword in question for keyword in ["匹配", "匹配点", "项目和岗位"]):
@@ -377,28 +362,31 @@ def create_embedding(api_key: str, text: str) -> list[float]:
 
 def search_qdrant(query_vector: list[float], top_k: int = DEFAULT_TOP_K) -> list[dict]:
     client = QdrantClient(path=str(QDRANT_PATH))
-    if not client.collection_exists(COLLECTION_NAME):
-        raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
+    try:
+        if not client.collection_exists(COLLECTION_NAME):
+            raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
 
-    results = client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=query_vector,
-        with_payload=True,
-        limit=top_k,
-    ).points
+        results = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_vector,
+            with_payload=True,
+            limit=top_k,
+        ).points
 
-    sections = []
-    for result in results:
-        payload = result.payload or {}
-        sections.append(
-            {
-                "source_file": payload.get("source_file", "unknown"),
-                "title": payload.get("title", "unknown"),
-                "content": payload.get("content", ""),
-                "score": result.score,
-            }
-        )
-    return sections
+        sections = []
+        for result in results:
+            payload = result.payload or {}
+            sections.append(
+                {
+                    "source_file": payload.get("source_file", "unknown"),
+                    "title": payload.get("title", "unknown"),
+                    "content": payload.get("content", ""),
+                    "score": result.score,
+                }
+            )
+        return sections
+    finally:
+        client.close()
 
 
 def get_sections_by_source_files(source_files: list[str], limit_per_source: int = 5) -> list[dict]:
@@ -406,36 +394,39 @@ def get_sections_by_source_files(source_files: list[str], limit_per_source: int 
         return []
 
     client = QdrantClient(path=str(QDRANT_PATH))
-    if not client.collection_exists(COLLECTION_NAME):
-        raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
+    try:
+        if not client.collection_exists(COLLECTION_NAME):
+            raise RuntimeError("未找到 Qdrant 索引，请先运行 src/build_index.py。")
 
-    sections = []
-    for source_file in source_files:
-        records, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="source_file",
-                        match=models.MatchValue(value=source_file),
-                    )
-                ]
-            ),
-            limit=limit_per_source,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for record in records:
-            payload = record.payload or {}
-            sections.append(
-                {
-                    "source_file": payload.get("source_file", "unknown"),
-                    "title": payload.get("title", "unknown"),
-                    "content": payload.get("content", ""),
-                    "score": None,
-                }
+        sections = []
+        for source_file in source_files:
+            records, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_file",
+                            match=models.MatchValue(value=source_file),
+                        )
+                    ]
+                ),
+                limit=limit_per_source,
+                with_payload=True,
+                with_vectors=False,
             )
-    return sections
+            for record in records:
+                payload = record.payload or {}
+                sections.append(
+                    {
+                        "source_file": payload.get("source_file", "unknown"),
+                        "title": payload.get("title", "unknown"),
+                        "content": payload.get("content", ""),
+                        "score": None,
+                    }
+                )
+        return sections
+    finally:
+        client.close()
 
 
 def is_career_analysis_question(question: str) -> bool:
