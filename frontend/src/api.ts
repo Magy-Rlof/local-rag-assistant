@@ -36,6 +36,21 @@ export type ChatArtifact = {
   content_markdown: string;
   review_status: string;
   warnings: string[];
+  highlights?: string[];
+  metrics?: Record<string, string | number | boolean>;
+  generation_mode?: string;
+  generation_model?: string;
+  generation_seconds?: number;
+  llm_attempted?: boolean;
+  llm_repair_attempted?: boolean;
+  fallback_reason?: string;
+  fallback_detail?: string;
+  validation_errors?: string[];
+  resume_evidence_status?: string;
+  resume_evidence_status_label?: string;
+  question_type_summary?: Record<string, number>;
+  skill_areas?: string[];
+  session_payload?: JobInterviewSessionResponse;
   actions: ChatArtifactAction[];
 };
 
@@ -64,6 +79,11 @@ export type AskStreamCallbacks = {
   onMeta?: (meta: AskStreamMeta) => void;
   onDelta?: (text: string) => void;
   onDone?: (response: AskResponse) => void;
+};
+
+export type AskStreamOptions = {
+  requestId?: string;
+  signal?: AbortSignal;
 };
 
 export type IndexResponse = {
@@ -399,7 +419,17 @@ export type JobMatchReportBatchDeleteResponse = {
 
 export type InterviewQuestion = {
   question_id: number;
+  type?: "single_choice" | "true_false" | "open" | string;
+  difficulty?: string;
+  skill_area?: string;
   question: string;
+  options?: Array<{ key: string; text: string }>;
+  correct_answer?: string | string[];
+  explanation?: string;
+  source_requirement_id?: string;
+  source_requirement?: string;
+  source_refs?: Array<{ type: string; source_id: string; relative_path: string; quote: string }>;
+  risk_hint?: string;
   requirement: string;
   intent: string;
   answer_checkpoints: string[];
@@ -408,6 +438,14 @@ export type InterviewQuestion = {
 
 export type InterviewSession = {
   target_confirmation: JobTargetConfirmation;
+  generation_mode?: string;
+  generation_model?: string;
+  generation_seconds?: number;
+  llm_attempted?: boolean;
+  llm_repair_attempted?: boolean;
+  fallback_reason?: string;
+  fallback_detail?: string;
+  validation_errors?: string[];
   questions: InterviewQuestion[];
   answer_guidance: string[];
   safety_notes: string[];
@@ -420,6 +458,14 @@ export type JobInterviewSessionResponse = {
   current_resume: DocumentInfo | null;
   session: InterviewSession | null;
   warnings: string[];
+  generation_mode?: string;
+  generation_model?: string;
+  generation_seconds?: number;
+  llm_attempted?: boolean;
+  llm_repair_attempted?: boolean;
+  fallback_reason?: string;
+  fallback_detail?: string;
+  validation_errors?: string[];
 };
 
 export type InterviewFeedback = {
@@ -510,12 +556,17 @@ export async function askQuestion(question: string, history: ChatMessage[] = [])
 export async function askQuestionStream(
   question: string,
   history: ChatMessage[] = [],
-  callbacks: AskStreamCallbacks = {}
+  callbacks: AskStreamCallbacks = {},
+  options: AskStreamOptions = {}
 ): Promise<AskResponse> {
   const response = await fetch(`${API_BASE_URL}/api/rag/ask/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, history })
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.requestId ? { "X-Request-Id": options.requestId } : {}),
+    },
+    body: JSON.stringify({ question, history }),
+    signal: options.signal,
   });
 
   if (!response.ok || !response.body) {

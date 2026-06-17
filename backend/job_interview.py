@@ -1,9 +1,11 @@
 import re
 
 from .job_match_draft import build_job_match_draft
+from .job_interview_llm import generate_interview_questions_with_llm_fallback
 
 
 MAX_INTERVIEW_ITEMS = 8
+CHOICE_COUNT = 5
 EVIDENCE_SIGNALS = [
     "项目",
     "负责",
@@ -50,19 +52,29 @@ def build_interview_session(query: str) -> dict:
         }
 
     draft = draft_response["draft"]
-    questions = build_questions(draft)
+    generated = generate_interview_questions_with_llm_fallback(draft_response)
+    questions = generated["questions"]
     session = {
         "target_confirmation": draft["target_confirmation"],
+        "generation_mode": generated["generation_mode"],
+        "generation_model": generated["generation_model"],
+        "generation_seconds": generated["generation_seconds"],
+        "llm_attempted": generated.get("llm_attempted", False),
+        "llm_repair_attempted": generated.get("llm_repair_attempted", False),
+        "fallback_reason": generated.get("fallback_reason", ""),
+        "fallback_detail": generated.get("fallback_detail", ""),
+        "validation_errors": generated.get("validation_errors", []),
         "questions": questions,
         "answer_guidance": [
-            "优先使用 STAR 结构：背景、任务、行动、结果。",
+            "选择题和判断题用于快速校准岗位要求，不代表你已经具备对应能力。",
+            "面试回答仍建议使用 STAR 结构：背景、任务、行动、结果。",
             "每个回答至少给出一个真实项目、具体动作和可核查证据。",
-            "不会的内容可以说明学习计划，不要把未验证能力说成已具备。",
-            "如果回答涉及简历修改，仍需区分可写入简历和只适合面试表达。",
+            "不会的内容可以说明学习计划或补齐路径，不要把未验证能力说成已经具备。",
         ],
         "safety_notes": [
             "本接口只做面试准备与回答反馈，不自动修改简历。",
-            "本接口不调用 LLM、不访问招聘平台、不触发索引、不自动投递。",
+            "LLM 面试题生成只在显式启用时调用；默认不发送完整真实简历，只发送岗位要求和简历证据状态摘要。",
+            "本接口不访问招聘平台、不触发索引、不自动投递。",
             "反馈结果是启发式检查，不能替代真实面试官判断。",
         ],
     }
@@ -72,7 +84,15 @@ def build_interview_session(query: str) -> dict:
         "target_job": draft_response["target_job"],
         "current_resume": draft_response["current_resume"],
         "session": session,
-        "warnings": draft_response["warnings"],
+        "warnings": dedupe(filter_interview_warnings(draft_response["warnings"]) + generated["warnings"]),
+        "generation_mode": generated["generation_mode"],
+        "generation_model": generated["generation_model"],
+        "generation_seconds": generated["generation_seconds"],
+        "llm_attempted": generated.get("llm_attempted", False),
+        "llm_repair_attempted": generated.get("llm_repair_attempted", False),
+        "fallback_reason": generated.get("fallback_reason", ""),
+        "fallback_detail": generated.get("fallback_detail", ""),
+        "validation_errors": generated.get("validation_errors", []),
     }
 
 
@@ -114,22 +134,121 @@ def build_questions(draft: dict) -> list[dict]:
 
     questions = []
     for index, item in enumerate(source_items, start=1):
-        questions.append(
-            {
-                "question_id": index,
-                "question": f"请结合一个真实项目，说明你如何应对或补齐：{item}",
-                "requirement": item,
-                "intent": "验证候选人是否能把岗位要求映射到真实项目、具体行动和证据。",
-                "answer_checkpoints": [
-                    "是否给出真实项目或学习实践。",
-                    "是否说明本人具体负责的动作。",
-                    "是否给出工具、接口、数据、结果或引用来源等证据。",
-                    "是否避免夸大未验证能力。",
-                ],
-                "risk_reminder": "如果没有相关经历，应说明学习计划或补齐路径，不要编造项目经验。",
-            }
-        )
+        if index <= CHOICE_COUNT:
+            questions.append(build_choice_question(index, item))
+        else:
+            questions.append(build_true_false_question(index, item))
     return questions
+
+
+def build_choice_question(index: int, requirement: str) -> dict:
+    skill_area = extract_skill_area(requirement)
+    question = f"针对岗位要求“{requirement}”，以下哪种面试回答最适合作为可核查表达？"
+    options = [
+        {
+            "key": "A",
+            "text": f"直接声称自己精通{skill_area}，不需要补充项目证据。",
+        },
+        {
+            "key": "B",
+            "text": f"结合一个真实项目说明自己如何接触或补齐{skill_area}，明确本人动作、工具和结果。",
+        },
+        {
+            "key": "C",
+            "text": "只复述岗位 JD 的原句，避免说明自己的实际经历。",
+        },
+        {
+            "key": "D",
+            "text": "把正在学习的能力直接写成已在生产环境长期使用。",
+        },
+    ]
+    return {
+        "question_id": index,
+        "type": "single_choice",
+        "skill_area": skill_area,
+        "question": question,
+        "options": options,
+        "correct_answer": "B",
+        "explanation": "B 同时给出真实项目、本人动作和证据边界，最符合岗位匹配和简历安全要求。",
+        "source_requirement": requirement,
+        "risk_hint": "不要把岗位要求直接改写成个人能力；缺少证据时只能作为学习计划或面试准备。",
+        "requirement": requirement,
+        "intent": "验证候选人是否能把岗位要求映射到真实项目、具体行动和证据。",
+        "answer_checkpoints": [
+            "是否给出真实项目或学习实践。",
+            "是否说明本人具体负责的动作。",
+            "是否给出工具、接口、数据、结果或引用来源等证据。",
+            "是否避免夸大未验证能力。",
+        ],
+        "risk_reminder": "如果没有相关经历，应说明学习计划或补齐路径，不要编造项目经验。",
+    }
+
+
+def build_true_false_question(index: int, requirement: str) -> dict:
+    skill_area = extract_skill_area(requirement)
+    statement = f"如果当前简历没有证明“{skill_area}”的真实项目证据，也可以把该能力直接写入正式简历。"
+    return {
+        "question_id": index,
+        "type": "true_false",
+        "skill_area": skill_area,
+        "question": statement,
+        "options": [
+            {"key": "正确", "text": "可以直接写入。"},
+            {"key": "错误", "text": "不应直接写入，需要先补充真实证据。"},
+        ],
+        "correct_answer": "错误",
+        "explanation": "证据不足时不能把岗位要求包装成个人能力；可以先用于面试准备、学习计划或证据补齐清单。",
+        "source_requirement": requirement,
+        "risk_hint": "简历表达必须由真实简历、项目资料或其他可信证据支撑。",
+        "requirement": requirement,
+        "intent": "检查候选人是否理解简历表达和面试准备之间的安全边界。",
+        "answer_checkpoints": [
+            "是否明确不能无证据写入简历。",
+            "是否能区分面试准备、学习计划和正式简历表达。",
+            "是否能指出需要补充真实项目证据。",
+        ],
+        "risk_reminder": "缺少证据时，不能把学习计划或岗位要求写成已具备能力。",
+    }
+
+
+def extract_skill_area(requirement: str) -> str:
+    text = requirement or ""
+    preferred_terms = [
+        "RAG",
+        "LLM",
+        "多模态",
+        "微调",
+        "PyTorch",
+        "TensorFlow",
+        "Python",
+        "C++",
+        "Java",
+        "Pandas",
+        "Spark",
+        "API",
+        "AI pipeline",
+        "云部署",
+        "图像识别",
+    ]
+    lowered = text.lower()
+    for term in preferred_terms:
+        if term.lower() in lowered:
+            return term
+    cleaned = re.sub(r"\s+", " ", text).strip(" 。；;，,")
+    return cleaned[:24] or "目标能力"
+
+
+def filter_interview_warnings(warnings: list[str]) -> list[str]:
+    blocked_terms = ("写入简历", "简历差异", "简历草稿", "覆盖真实简历")
+    return [warning for warning in warnings if not any(term in warning for term in blocked_terms)]
+
+
+def dedupe(values: list[str]) -> list[str]:
+    results = []
+    for value in values:
+        if value and value not in results:
+            results.append(value)
+    return results
 
 
 def analyze_answer(question: dict, answer: str) -> dict:
@@ -189,7 +308,7 @@ def analyze_answer(question: dict, answer: str) -> dict:
 
 
 def mentions_requirement_without_evidence(requirement: str, answer: str, evidence_hits: list[str]) -> bool:
-    keywords = [item for item in re.split(r"[、/，,（）()\s]+", requirement) if len(item) >= 4]
+    keywords = [item for item in re.split(r"[、，；。:：（）()\s]+", requirement) if len(item) >= 4]
     return any(keyword in answer for keyword in keywords[:5]) and not evidence_hits
 
 

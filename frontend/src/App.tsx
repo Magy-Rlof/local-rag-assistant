@@ -91,6 +91,7 @@ type AgentLaunch = {
   query: string;
   artifactType: ChatArtifact["type"];
   fileName: string;
+  artifact?: ChatArtifact;
 };
 
 type NavItem = {
@@ -187,6 +188,7 @@ function App() {
       query: artifact.query,
       artifactType: artifact.type,
       fileName: artifact.file_name,
+      artifact,
     });
     setActivePage("agent");
   }
@@ -254,6 +256,7 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
   const [selectedArtifact, setSelectedArtifact] = useState<ChatArtifact | null>(() => loadAskSelectedArtifact());
   const [showCitations, setShowCitations] = useState(false);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
   const latestResponse = latestAssistantMessage?.response;
 
@@ -281,6 +284,8 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
     setError("");
     setSelectedArtifact(null);
     setShowCitations(false);
+    const requestId = createRequestId();
+    activeRequestIdRef.current = requestId;
     const userMessage: ConversationMessage = {
       id: createMessageId(),
       role: "user",
@@ -294,12 +299,14 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
       id: assistantMessageId,
       role: "assistant",
       content: "",
+      response: createEmptyAskResponse(),
     };
     setMessages((currentMessages) => [...currentMessages, userMessage, assistantMessage]);
     setQuestion("");
     try {
       const finalResponse = await askQuestionStream(trimmedQuestion, history, {
         onMeta: (meta) => {
+          if (activeRequestIdRef.current !== requestId) return;
           setMessages((currentMessages) =>
             currentMessages.map((message) =>
               message.id === assistantMessageId
@@ -320,21 +327,15 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
           );
         },
         onDelta: (text) => {
+          if (activeRequestIdRef.current !== requestId) return;
           setMessages((currentMessages) =>
             currentMessages.map((message) =>
-              message.id === assistantMessageId
-                ? {
-                    ...message,
-                    content: message.content + text,
-                    response: message.response
-                      ? { ...message.response, answer: message.content + text }
-                      : message.response,
-                  }
-                : message
+              message.id === assistantMessageId ? appendAssistantDelta(message, text) : message
             )
           );
         },
         onDone: (nextResponse) => {
+          if (activeRequestIdRef.current !== requestId) return;
           if (nextResponse.artifacts[0]) {
             setSelectedArtifact(nextResponse.artifacts[0]);
             setShowCitations(false);
@@ -351,7 +352,8 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
             )
           );
         },
-      });
+      }, { requestId });
+      if (activeRequestIdRef.current !== requestId) return;
       if (finalResponse.artifacts[0]) {
         setSelectedArtifact(finalResponse.artifacts[0]);
         setShowCitations(false);
@@ -368,10 +370,28 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
         )
       );
     } catch (requestError) {
-      setError(formatRequestError(requestError, "生成回答失败。"));
-      setMessages((currentMessages) => currentMessages.filter((message) => message.id !== assistantMessageId));
+      if (activeRequestIdRef.current !== requestId) return;
+      const errorMessage = formatRequestError(requestError, "生成回答失败。");
+      setError(errorMessage);
+      setMessages((currentMessages) =>
+        currentMessages.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: errorMessage,
+                response: {
+                  ...createEmptyAskResponse(),
+                  answer: errorMessage,
+                },
+              }
+            : message
+        )
+      );
     } finally {
-      setLoading(false);
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -389,6 +409,8 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
         )}
         {messages.length > 0 && (
           <button className="secondary-button small-button" onClick={() => {
+            activeRequestIdRef.current = null;
+            setLoading(false);
             setMessages([]);
             setError("");
             setSelectedArtifact(null);
@@ -513,7 +535,6 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
             <ChatArtifactPreview artifact={selectedArtifact} onOpenAgent={onOpenAgent} />
           )}
           <div className="citation-content">
-          <div className="rail-title">引用</div>
           {!latestResponse?.sources.length && <div className="empty-state compact">暂无引用</div>}
           <div className="source-list">
             {latestResponse?.sources.map((source) => (
@@ -542,7 +563,8 @@ function ChatArtifactCard({
   onSelect: () => void;
   onOpenAgent: (artifact: ChatArtifact) => void;
 }) {
-  const warnings = artifact.warnings.filter(Boolean).slice(0, 2);
+  const highlights = getArtifactHighlights(artifact).slice(0, 4);
+  const metricEntries = getArtifactMetricEntries(artifact).slice(0, 4);
 
   function handleAction(action: ChatArtifact["actions"][number]) {
     if (action.kind === "download_markdown") {
@@ -570,7 +592,6 @@ function ChatArtifactCard({
       <div className="artifact-card-header">
         <div>
           <div className="artifact-type-label">{formatArtifactType(artifact.type)}</div>
-          <h3>{artifact.title}</h3>
           <p>{artifact.description}</p>
         </div>
         {artifact.file_name && (
@@ -579,15 +600,33 @@ function ChatArtifactCard({
           </span>
         )}
       </div>
-      <div className="artifact-scope">
-        <ShieldCheck size={15} />
-        <span>{artifact.scope_note}</span>
-      </div>
-      {warnings.length > 0 && (
-        <div className="artifact-warnings">
-          {warnings.map((warning) => (
-            <span key={warning}>{warning}</span>
+      {metricEntries.length > 0 && (
+        <div className="artifact-metric-row">
+          {metricEntries.map(([key, value]) => (
+            <span className="artifact-metric-chip" key={key}>
+              {formatArtifactMetricLabel(key)}：{String(value)}
+            </span>
           ))}
+        </div>
+      )}
+      {artifact.resume_evidence_status_label && (
+        <div className="artifact-evidence-status">
+          <ShieldCheck size={15} />
+          <span>{artifact.resume_evidence_status_label}</span>
+        </div>
+      )}
+      {highlights.length > 0 && (
+        <ul className="artifact-highlight-list">
+          {highlights.map((highlight) => (
+            <li key={highlight}>{highlight}</li>
+          ))}
+        </ul>
+      )}
+      {artifact.fallback_detail && (
+        <div className="artifact-diagnostic">
+          <strong>LLM 诊断</strong>
+          <span>{artifact.fallback_detail}</span>
+          {Boolean(artifact.validation_errors?.length) && <small>{artifact.validation_errors?.slice(0, 2).join("；")}</small>}
         </div>
       )}
       <div className="artifact-actions">
@@ -617,26 +656,11 @@ function ChatArtifactPreview({
   artifact: ChatArtifact;
   onOpenAgent: (artifact: ChatArtifact) => void;
 }) {
+  const previewMarkdown = getArtifactPreviewMarkdown(artifact);
   return (
-    <div className="artifact-detail-panel">
-      <div className="artifact-detail-header">
-        <div>
-          <div className="artifact-type-label">{formatArtifactType(artifact.type)}</div>
-          <h2>{artifact.title}</h2>
-          <p>{artifact.description}</p>
-        </div>
-      </div>
-      {artifact.file_name && (
-        <div className="artifact-detail-path" title={artifact.file_name}>
-          {artifact.file_name}
-        </div>
-      )}
-      <div className="artifact-scope">
-        <ShieldCheck size={15} />
-        <span>{artifact.scope_note}</span>
-      </div>
+    <div className="artifact-detail-panel artifact-detail-panel-body-only">
       <div className="artifact-detail-content">
-        <ReactMarkdown>{artifact.content_markdown || artifact.content_preview || "暂无预览内容。"}</ReactMarkdown>
+        <ReactMarkdown>{previewMarkdown}</ReactMarkdown>
       </div>
       <div className="artifact-actions">
         <button className="secondary-button small-button" type="button" onClick={() => downloadChatArtifact(artifact)}>
@@ -650,6 +674,54 @@ function ChatArtifactPreview({
       </div>
     </div>
   );
+}
+
+function getArtifactPreviewMarkdown(artifact: ChatArtifact) {
+  const markdown = artifact.content_markdown || artifact.content_preview || "暂无预览内容。";
+  if (artifact.type === "interview_session") {
+    return stripMarkdownSections(markdown, ["## 回答边界", "## 来源与安全边界"]);
+  }
+  return stripMarkdownSections(markdown, ["## 来源与安全边界", "## 原始 warnings"]);
+}
+
+function stripMarkdownSections(markdown: string, headings: string[]) {
+  let result = markdown;
+  for (const heading of headings) {
+    const index = result.indexOf(heading);
+    if (index >= 0) result = result.slice(0, index).trim();
+  }
+  return result || markdown;
+}
+
+function getArtifactHighlights(artifact: ChatArtifact) {
+  if (artifact.highlights?.length) return artifact.highlights.filter(Boolean);
+  const preview = artifact.content_preview || "";
+  return preview
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-#*\s]+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function getArtifactMetricEntries(artifact: ChatArtifact): Array<[string, string | number | boolean]> {
+  return Object.entries(artifact.metrics ?? {}).filter(([, value]) => value !== "" && value !== undefined && value !== null);
+}
+
+function formatArtifactMetricLabel(key: string) {
+  const labels: Record<string, string> = {
+    can_write: "可写入",
+    requires_evidence: "需补证据",
+    interview_only: "面试准备",
+    cannot_claim: "不能声称",
+    question_count: "题目",
+    generation_mode: "生成模式",
+    single_choice: "选择题",
+    multiple_choice: "多选题",
+    true_false: "判断题",
+    matched_jobs: "岗位",
+    report_count: "报告",
+  };
+  return labels[key] ?? key;
 }
 
 function downloadChatArtifact(artifact: ChatArtifact) {
@@ -760,13 +832,22 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
       } else if (launch.artifactType === "resume_revision_draft" && launch.fileName) {
         await handleReadResumeDiff(launch.fileName);
       } else if (launch.artifactType === "interview_session" && launch.query) {
-        const data = await runAction("interview", () => buildJobInterviewSession(launch.query));
-        if (!cancelled && data) {
-          setInterviewSession(data);
+        const embeddedSession = launch.artifact?.session_payload;
+        if (embeddedSession) {
+          setInterviewSession(embeddedSession);
           setInterviewFeedback(null);
           setInterviewAnswer("");
-          setSelectedQuestionId(data.session?.questions[0]?.question_id ?? null);
+          setSelectedQuestionId(embeddedSession.session?.questions[0]?.question_id ?? null);
           setActiveAgentTab("interview");
+        } else {
+          const data = await runAction("interview", () => buildJobInterviewSession(launch.query));
+          if (!cancelled && data) {
+            setInterviewSession(data);
+            setInterviewFeedback(null);
+            setInterviewAnswer("");
+            setSelectedQuestionId(data.session?.questions[0]?.question_id ?? null);
+            setActiveAgentTab("interview");
+          }
         }
       } else if (launch.artifactType === "job_summary") {
         setActiveAgentTab("overview");
@@ -1226,7 +1307,7 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
       >
         <MessageSquareText size={17} />
         <span>面试模拟</span>
-        <small>{interviewSession?.session?.questions.length ?? 0} 个问题</small>
+        <small>{loadingAction === "interview" ? "生成中" : `${interviewSession?.session?.questions.length ?? 0} 个问题`}</small>
       </button>
     </div>
   );
@@ -1544,8 +1625,19 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
                   <h2>面试模拟</h2>
                   <p>{interviewSession?.matched ? "选择问题，提交回答并查看反馈" : "先生成面试问题"}</p>
                 </div>
+                <button
+                  className="secondary-button small-button"
+                  type="button"
+                  onClick={handleBuildInterviewSession}
+                  disabled={busy || !query.trim()}
+                >
+                  {loadingAction === "interview" ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                  重新生成
+                </button>
               </div>
-              {!interviewSession?.matched || !interviewSession.session ? (
+              {loadingAction === "interview" ? (
+                <div className="empty-state">正在生成面试问题，请稍候。</div>
+              ) : !interviewSession?.matched || !interviewSession.session ? (
                 <div className="empty-state">暂无面试问题。</div>
               ) : (
                 <div className="interview-workbench">
@@ -1823,15 +1915,61 @@ function getSelectedInterviewQuestion(
 
 function InterviewQuestionDetail({ question }: { question: InterviewQuestion | null }) {
   if (!question) return <div className="empty-state compact">请选择一个问题。</div>;
+  const questionTypeLabel =
+    question.type === "single_choice"
+      ? "单选题"
+      : question.type === "multiple_choice"
+        ? "多选题"
+        : question.type === "true_false"
+          ? "判断题"
+          : "开放题";
+  const correctAnswer = Array.isArray(question.correct_answer)
+    ? question.correct_answer.join("、")
+    : question.correct_answer || "";
   return (
     <div className="interview-question-detail">
+      <div className="interview-question-meta">
+        <span>{questionTypeLabel}</span>
+        {question.skill_area && <span>{question.skill_area}</span>}
+      </div>
+      <p className="interview-question-main">{question.question}</p>
+      {Boolean(question.options?.length) && (
+        <div className="interview-options">
+          {question.options?.map((option) => (
+            <div className="interview-option" key={option.key}>
+              <strong>{option.key}</strong>
+              <span>{option.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {correctAnswer && (
+        <div className="interview-answer-box">
+          <strong>正确答案：{correctAnswer}</strong>
+          {question.explanation && <p>{question.explanation}</p>}
+        </div>
+      )}
       <p>{question.intent}</p>
       <ul>
-        {question.answer_checkpoints.map((checkpoint) => (
+        {(question.answer_checkpoints ?? []).map((checkpoint) => (
           <li key={checkpoint}>{checkpoint}</li>
         ))}
       </ul>
-      <div className="warning-box compact-alert">{question.risk_reminder}</div>
+      {(question.source_requirement || question.requirement) && (
+        <div className="artifact-detail-path">来源岗位要求：{question.source_requirement || question.requirement}</div>
+      )}
+      {Boolean(question.source_refs?.length) && (
+        <div className="interview-source-refs">
+          <strong>来源引用</strong>
+          {question.source_refs?.map((ref, index) => (
+            <span key={`${ref.relative_path}-${index}`}>
+              {ref.source_id || ref.relative_path || ref.type}
+              {ref.quote ? `：${ref.quote}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="warning-box compact-alert">{question.risk_hint || question.risk_reminder}</div>
     </div>
   );
 }
@@ -2313,6 +2451,35 @@ function formatMode(mode: AskResponse["mode"]) {
 
 function createMessageId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createRequestId() {
+  return crypto.randomUUID?.() ?? createMessageId();
+}
+
+function createEmptyAskResponse(): AskResponse {
+  return {
+    answer: "",
+    truncated: false,
+    sources: [],
+    retrieval_seconds: 0,
+    generation_seconds: 0,
+    mode: "chat",
+    artifacts: [],
+  };
+}
+
+function appendAssistantDelta(message: ConversationMessage, text: string): ConversationMessage {
+  const nextContent = message.content + text;
+  return {
+    ...message,
+    content: nextContent,
+    response: {
+      ...(message.response ?? createEmptyAskResponse()),
+      answer: nextContent,
+      artifacts: message.response?.artifacts ?? [],
+    },
+  };
 }
 
 function cleanAnswer(answer: string) {

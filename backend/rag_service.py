@@ -104,7 +104,7 @@ def stream_with_rag(question: str, history: list[dict] | None = None):
                 "truncated": False,
                 "sources": prepared["sources"],
                 "retrieval_seconds": prepared["retrieval_seconds"],
-                "generation_seconds": 0.0,
+                "generation_seconds": prepared.get("generation_seconds", 0.0),
                 "mode": prepared["mode"],
                 "artifacts": artifacts,
             },
@@ -302,22 +302,9 @@ def stream_model_messages(api_key: str, messages: list[dict], temperature: float
 
 def prepare_generation(question: str, history: list[dict] | None = None) -> dict:
     safe_history = normalize_history(history or [])
-    job_tool_result = build_job_chat_tool_result(question, safe_history)
     task_type = detect_task_type(question, safe_history)
     conversation_state = build_conversation_state(question, safe_history)
     context_plan = build_context_plan(task_type, conversation_state)
-
-    if job_tool_result.get("answer_note"):
-        return {
-            "messages": [],
-            "direct_answer": job_tool_result["answer_note"],
-            "sources": [],
-            "retrieval_seconds": 0.0,
-            "mode": "system",
-            "task_type": task_type,
-            "question": question,
-            "job_tool_result": {"artifacts": job_tool_result["artifacts"], "answer_note": ""},
-        }
 
     system_answer = answer_system_question(question)
     if system_answer:
@@ -329,7 +316,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "mode": "system",
             "task_type": task_type,
             "question": question,
-            "job_tool_result": job_tool_result,
+            "job_tool_result": {"artifacts": [], "answer_note": ""},
         }
 
     overview_answer = answer_library_overview_question(question, safe_history)
@@ -342,7 +329,25 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "mode": "system",
             "task_type": task_type,
             "question": question,
-            "job_tool_result": job_tool_result,
+            "job_tool_result": {"artifacts": [], "answer_note": ""},
+        }
+
+    job_tool_result = build_job_chat_tool_result(question, safe_history)
+    if job_tool_result.get("answer_note"):
+        return {
+            "messages": [],
+            "direct_answer": job_tool_result["answer_note"],
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
+            "mode": "chat",
+            "task_type": task_type,
+            "question": question,
+            "job_tool_result": {
+                "artifacts": job_tool_result["artifacts"],
+                "answer_note": "",
+                "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
+            },
         }
 
     if not should_use_rag(question, safe_history, task_type):
@@ -461,43 +466,43 @@ def format_sources(sections: list[dict]) -> list[dict]:
 
 def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
     safe_history = normalize_history(history or [])
-    job_tool_result = build_job_chat_tool_result(question, safe_history)
     task_type = detect_task_type(question, safe_history)
     conversation_state = build_conversation_state(question, safe_history)
     context_plan = build_context_plan(task_type, conversation_state)
 
+    system_answer = answer_system_question(question)
+    if system_answer:
+        return {
+            "answer": system_answer,
+            "truncated": False,
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": 0.0,
+            "mode": "system",
+            "artifacts": [],
+        }
+
+    overview_answer = answer_library_overview_question(question, safe_history)
+    if overview_answer:
+        return {
+            "answer": overview_answer,
+            "truncated": False,
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": 0.0,
+            "mode": "system",
+            "artifacts": [],
+        }
+
+    job_tool_result = build_job_chat_tool_result(question, safe_history)
     if job_tool_result.get("answer_note"):
         return {
             "answer": job_tool_result["answer_note"],
             "truncated": False,
             "sources": [],
             "retrieval_seconds": 0.0,
-            "generation_seconds": 0.0,
-            "mode": "system",
-            "artifacts": job_tool_result["artifacts"],
-        }
-
-    system_answer = answer_system_question(question)
-    if system_answer:
-        return {
-            "answer": append_job_tool_note(system_answer, job_tool_result),
-            "truncated": False,
-            "sources": [],
-            "retrieval_seconds": 0.0,
-            "generation_seconds": 0.0,
-            "mode": "system",
-            "artifacts": job_tool_result["artifacts"],
-        }
-
-    overview_answer = answer_library_overview_question(question, safe_history)
-    if overview_answer:
-        return {
-            "answer": append_job_tool_note(overview_answer, job_tool_result),
-            "truncated": False,
-            "sources": [],
-            "retrieval_seconds": 0.0,
-            "generation_seconds": 0.0,
-            "mode": "system",
+            "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
+            "mode": "chat",
             "artifacts": job_tool_result["artifacts"],
         }
 

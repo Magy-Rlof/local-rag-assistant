@@ -8,21 +8,21 @@ from .resume_revision_draft_export import export_resume_revision_draft, read_res
 
 
 SCOPE_NOTE = "范围限定：仅基于当前资料库、已索引、已合法导入的岗位资料，不代表全网或招聘平台全部岗位。"
+SAFETY_NOTE = "安全边界：不自动投递，不覆盖真实简历，不绕过登录、验证码、反爬或平台限制。"
 
 
 def build_job_chat_tool_result(question: str, history: list[dict] | None = None) -> dict:
     current_text = question or ""
-    context_text = build_intent_text(question, history or [])
-    if not is_job_tool_intent(current_text) and not is_job_tool_intent(context_text):
+    if not is_job_tool_intent(current_text):
         return {"artifacts": [], "answer_note": ""}
 
     artifacts: list[dict] = []
     notices: list[str] = []
-    target_query = extract_target_query(current_text) or extract_target_query(context_text)
-    intent = detect_job_tool_intent(current_text if is_job_tool_intent(current_text) else context_text)
+    target_query = extract_target_query(current_text)
+    intent = detect_job_tool_intent(current_text)
 
     if intent == "job_summary":
-        summary_artifact = build_job_summary_artifact(current_text or context_text)
+        summary_artifact = build_job_summary_artifact(current_text)
         if summary_artifact:
             artifacts.append(summary_artifact)
         elif target_query:
@@ -30,17 +30,17 @@ def build_job_chat_tool_result(question: str, history: list[dict] | None = None)
             if report:
                 artifacts.append(report)
         else:
-            notices.append("未在当前资料库中匹配到可汇总的岗位。请先通过 n8n 合法导入岗位并更新索引，或提供岗位 ID、marker、文件名。")
+            notices.append("没有在当前资料库中命中可汇总的岗位。请先通过 n8n 合法导入岗位并更新索引，或提供岗位 ID、marker、文件名。")
 
     elif intent == "resume_revision":
         if not target_query:
-            notices.append("简历差距分析需要一个明确岗位。请提供当前资料库中的岗位 ID、marker、文件名或明确标题。")
+            notices.append("简历不足分析需要一个明确岗位。请提供当前资料库中的岗位 ID、marker、文件名或明确标题。")
         else:
             artifact = build_resume_revision_artifact(target_query)
             if artifact:
                 artifacts.append(artifact)
             else:
-                notices.append("未能生成简历优化草稿。请确认目标岗位已合法导入，并且已设置当前简历。")
+                notices.append("没有生成简历优化草稿。请确认目标岗位已合法导入，并且已设置当前简历。")
 
     elif intent == "interview":
         if not target_query:
@@ -50,7 +50,7 @@ def build_job_chat_tool_result(question: str, history: list[dict] | None = None)
             if artifact:
                 artifacts.append(artifact)
             else:
-                notices.append("未能生成面试模拟卡片。请确认目标岗位已合法导入。")
+                notices.append("没有生成面试模拟卡片。请确认目标岗位已合法导入。")
 
     else:
         if target_query:
@@ -63,6 +63,7 @@ def build_job_chat_tool_result(question: str, history: list[dict] | None = None)
     return {
         "artifacts": artifacts,
         "answer_note": build_answer_note(artifacts, notices),
+        "generation_seconds": sum(float(artifact.get("generation_seconds", 0.0) or 0.0) for artifact in artifacts),
     }
 
 
@@ -74,23 +75,68 @@ def append_job_tool_note(answer: str, tool_result: dict | None) -> str:
 
 
 def is_job_tool_intent(text: str) -> bool:
-    return any(
-        keyword in text
-        for keyword in (
-            "岗位",
-            "职位",
-            "JD",
-            "jd",
-            "简历",
-            "面试",
-            "匹配",
-            "差距",
-            "不足",
-            "优化",
-            "报告",
-            "求职",
-        )
+    normalized = text.strip()
+    lowered = normalized.lower()
+    if not normalized or is_generic_non_job_tool_question(normalized):
+        return False
+
+    direct_action_phrases = (
+        "生成面试题",
+        "生成面试模拟题",
+        "面试模拟题",
+        "面试模拟",
+        "模拟面试",
+        "面试题",
+        "优化简历",
+        "修改简历",
+        "简历优化",
+        "简历不足",
+        "简历草稿",
+        "岗位匹配",
+        "匹配报告",
+        "批量报告",
+        "求职 agent",
+        "求职Agent",
+        "求职分析",
     )
+    if any(phrase in normalized or phrase.lower() in lowered for phrase in direct_action_phrases):
+        return True
+
+    object_patterns = (
+        re.search(r"\b\d{8,}\b", normalized) is not None,
+        any(keyword in normalized for keyword in ("岗位", "职位", "JD", "jd", "简历", "求职")),
+    )
+    action_keywords = (
+        "生成",
+        "分析",
+        "匹配",
+        "草稿",
+        "报告",
+        "面试",
+        "审核",
+        "优化",
+        "修改",
+    )
+    return any(object_patterns) and any(keyword in normalized for keyword in action_keywords)
+
+
+def is_generic_non_job_tool_question(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text.lower())
+    deny_substrings = (
+        "什么是rag",
+        "rag是什么",
+        "简单说下",
+        "解释一下",
+        "rag和微调有什么区别",
+        "rag和微调区别",
+        "llm是什么",
+        "当前使用的模型",
+        "当前模型",
+        "使用的是什么模型",
+        "什么模型",
+        "哪个模型",
+    )
+    return any(pattern in compact for pattern in deny_substrings)
 
 
 def detect_job_tool_intent(text: str) -> str:
@@ -106,6 +152,8 @@ def detect_job_tool_intent(text: str) -> str:
 
 
 def build_intent_text(question: str, history: list[dict]) -> str:
+    # Kept for backwards compatibility with older callers. Job tool triggering
+    # must not use history; build_job_chat_tool_result intentionally ignores it.
     recent_user_text = "\n".join(
         item.get("content", "")
         for item in history[-6:]
@@ -147,10 +195,10 @@ def build_job_summary_artifact(text: str) -> dict | None:
     lines = [
         "# 当前资料库岗位汇总",
         "",
-        SCOPE_NOTE,
+        "## 摘要",
         "",
-        f"- 匹配岗位数：{len(matches)}",
-        "- 说明：这里只汇总本地资料库中已存在的岗位，不访问招聘平台、不登录、不绕过验证码或反爬限制。",
+        f"- 当前资料库命中 {len(matches)} 个候选岗位。",
+        "- 结果只来自本地已合法导入资料，不访问招聘平台。",
         "",
         "## 岗位清单",
     ]
@@ -164,17 +212,24 @@ def build_job_summary_artifact(text: str) -> dict | None:
                 f"   - 文件：{job.get('source_file')}",
             ]
         )
+    lines.extend(["", "## 来源与边界", "", f"- {SCOPE_NOTE}", f"- {SAFETY_NOTE}"])
 
     content = "\n".join(lines)
     return {
         "artifact_id": build_artifact_id("job_summary"),
         "type": "job_summary",
         "title": "当前资料库岗位汇总",
-        "description": f"在当前已合法导入岗位中匹配到 {len(matches)} 个候选岗位。",
+        "description": f"命中 {len(matches)} 个本地候选岗位。",
         "query": text,
         "scope_note": SCOPE_NOTE,
         "content_preview": content[:500],
         "content_markdown": content,
+        "highlights": [
+            f"命中 {len(matches)} 个本地岗位。",
+            "只汇总已合法导入、已索引资料。",
+            "未访问外部招聘平台。",
+        ],
+        "metrics": {"matched_jobs": len(matches)},
         "warnings": ["未访问外部招聘平台；结果不代表全网全部岗位。"],
         "actions": [
             {"label": "下载 Markdown", "kind": "download_markdown"},
@@ -229,11 +284,13 @@ def build_report_artifact(query: str) -> dict | None:
     if not response.get("exported"):
         return None
     content = read_job_match_report_export(response["file_name"]).get("content", response.get("content_preview", ""))
+    target_job = response.get("target_job") or {}
+    title = target_job.get("title") or "目标岗位"
     return {
         "artifact_id": build_artifact_id("job_match_report"),
         "type": "job_match_report",
         "title": "岗位匹配报告",
-        "description": response.get("target_job", {}).get("title") or "已生成可审核岗位匹配报告。",
+        "description": f"{title} 的可审核匹配报告已生成。",
         "query": query,
         "scope_note": SCOPE_NOTE,
         "file_name": response.get("file_name", ""),
@@ -241,6 +298,12 @@ def build_report_artifact(query: str) -> dict | None:
         "content_preview": response.get("content_preview", ""),
         "content_markdown": content,
         "review_status": response.get("review_status", ""),
+        "highlights": [
+            f"目标岗位：{title}",
+            "已保存为独立报告副本，可进入审核。",
+            "不会自动投递或修改简历。",
+        ],
+        "metrics": {"report_count": 1},
         "warnings": response.get("warnings", []),
         "actions": [
             {"label": "下载 Markdown", "kind": "download_markdown"},
@@ -256,24 +319,137 @@ def build_resume_revision_artifact(query: str) -> dict | None:
         return None
     if not response.get("exported"):
         return None
+
     content = read_resume_revision_draft_export(response["file_name"]).get("content", response.get("content_preview", ""))
+    target_job = response.get("target_job") or {}
+    title = target_job.get("title") or "目标岗位"
+    metrics = parse_resume_revision_metrics(content)
+    evidence_status = build_resume_evidence_status(response.get("current_resume"), metrics)
+    highlights = build_resume_revision_highlights(title, metrics, evidence_status)
+    summary_markdown = build_resume_revision_preview_markdown(title, response, metrics, evidence_status, highlights, content)
     return {
         "artifact_id": build_artifact_id("resume_revision_draft"),
         "type": "resume_revision_draft",
         "title": "简历优化草稿",
-        "description": response.get("target_job", {}).get("title") or "已生成私有简历优化草稿。",
+        "description": f"{title}：{metrics['requires_evidence']} 条需补证据，{metrics['cannot_claim']} 条不能直接声称。",
         "query": query,
         "scope_note": SCOPE_NOTE,
         "file_name": response.get("file_name", ""),
         "relative_path": response.get("relative_path", ""),
-        "content_preview": response.get("content_preview", ""),
-        "content_markdown": content,
+        "content_preview": summary_markdown[:500],
+        "content_markdown": summary_markdown,
+        "review_status": "",
+        "highlights": highlights,
+        "metrics": metrics,
+        "resume_evidence_status": evidence_status["code"],
+        "resume_evidence_status_label": evidence_status["label"],
         "warnings": response.get("warnings", []),
         "actions": [
             {"label": "下载 Markdown", "kind": "download_markdown"},
             {"label": "进入审核", "kind": "open_job_agent"},
         ],
     }
+
+
+def parse_resume_revision_metrics(content: str) -> dict:
+    labels = {
+        "可直接考虑写入": "can_write",
+        "需补证据后再考虑": "requires_evidence",
+        "仅适合面试准备": "interview_only",
+        "不能声称能力": "cannot_claim",
+    }
+    metrics = {value: 0 for value in labels.values()}
+    for label, key in labels.items():
+        match = re.search(rf"{re.escape(label)}[：:]\s*(\d+)", content)
+        if match:
+            metrics[key] = int(match.group(1))
+    return metrics
+
+
+def build_resume_evidence_status(current_resume: dict | None, metrics: dict) -> dict:
+    if not current_resume:
+        return {"code": "not_configured", "label": "未配置当前简历", "detail": "请先在简历中心设置当前简历。"}
+    if metrics.get("can_write", 0) > 0:
+        return {
+            "code": "parsed_with_relevant_evidence",
+            "label": "已解析且有相关证据",
+            "detail": "当前资料中已有可考虑写入简历的候选表达，仍需人工审核。",
+        }
+    if metrics.get("requires_evidence", 0) > 0 or metrics.get("cannot_claim", 0) > 0:
+        return {
+            "code": "parsed_without_relevant_evidence",
+            "label": "已设置简历但未命中可直接写入证据",
+            "detail": "系统能识别当前简历文件，但缺少可支撑岗位核心要求的明确事实证据。",
+        }
+    return {
+        "code": "configured_unverified",
+        "label": "已设置简历，证据状态待人工复核",
+        "detail": "当前接口未能进一步确认简历是否覆盖岗位要求。",
+    }
+
+
+def build_resume_revision_highlights(title: str, metrics: dict, evidence_status: dict) -> list[str]:
+    highlights = [
+        f"目标岗位：{title}",
+        f"当前简历证据状态：{evidence_status['label']}",
+        f"可直接考虑写入 {metrics['can_write']} 条；需补证据 {metrics['requires_evidence']} 条。",
+        f"仅适合面试准备 {metrics['interview_only']} 条；不能直接声称 {metrics['cannot_claim']} 条。",
+    ]
+    if metrics["can_write"] == 0:
+        highlights.append("核心结论：暂不建议把新能力直接写进正式简历，应先补充真实项目或简历证据。")
+    return highlights
+
+
+def build_resume_revision_preview_markdown(
+    title: str,
+    response: dict,
+    metrics: dict,
+    evidence_status: dict,
+    highlights: list[str],
+    original_content: str,
+) -> str:
+    lines = [
+        f"# 简历优化草稿：{title}",
+        "",
+        "## 核心结论",
+        "",
+        *[f"- {item}" for item in highlights],
+        "",
+        "## 数量统计",
+        "",
+        f"- 可直接考虑写入：{metrics['can_write']} 条",
+        f"- 需补证据后再考虑：{metrics['requires_evidence']} 条",
+        f"- 仅适合面试准备：{metrics['interview_only']} 条",
+        f"- 不能声称能力：{metrics['cannot_claim']} 条",
+        "",
+        "## 当前简历证据状态",
+        "",
+        f"- 状态：{evidence_status['label']}",
+        f"- 说明：{evidence_status['detail']}",
+        f"- 当前简历：{format_resume_name(response.get('current_resume'))}",
+        "",
+        "## 下一步建议",
+        "",
+        "- 先补充真实项目、简历或资料库证据，再生成可写入版本。",
+        "- 证据不足的内容只能用于面试准备或学习计划。",
+        "- 下载 Markdown 或进入审核页查看完整明细。",
+        "",
+        "## 来源与安全边界",
+        "",
+        f"- {SCOPE_NOTE}",
+        f"- {SAFETY_NOTE}",
+        "",
+        "## 完整明细",
+        "",
+        original_content,
+    ]
+    return "\n".join(lines)
+
+
+def format_resume_name(current_resume: dict | None) -> str:
+    if not current_resume:
+        return "未配置"
+    return f"{current_resume.get('source', 'private')}:{current_resume.get('name', '未命名')}"
 
 
 def build_interview_artifact(query: str) -> dict | None:
@@ -286,32 +462,64 @@ def build_interview_artifact(query: str) -> dict | None:
 
     session = response["session"]
     questions = session.get("questions", [])
-    lines = [
-        "# 面试模拟",
-        "",
-        SCOPE_NOTE,
-        "",
-        "## 面试问题",
+    type_summary = summarize_question_types(questions)
+    skill_areas = dedupe([question.get("skill_area", "") for question in questions if question.get("skill_area")])[:5]
+    content = build_interview_markdown(questions, session)
+    generation_mode = session.get("generation_mode", response.get("generation_mode", "rule_fallback"))
+    generation_model = session.get("generation_model", response.get("generation_model", ""))
+    llm_attempted = bool(session.get("llm_attempted", response.get("llm_attempted", False)))
+    llm_repair_attempted = bool(session.get("llm_repair_attempted", response.get("llm_repair_attempted", False)))
+    fallback_reason = session.get("fallback_reason", response.get("fallback_reason", ""))
+    fallback_detail = session.get("fallback_detail", response.get("fallback_detail", ""))
+    validation_errors = session.get("validation_errors", response.get("validation_errors", []))
+    if generation_mode == "llm":
+        generation_mode_label = "LLM 生成"
+        generation_highlight = "生成模式：LLM 生成。"
+    elif llm_attempted:
+        generation_mode_label = "本地规则回退（已尝试 LLM）"
+        reason_text = fallback_reason or "未返回原因"
+        generation_highlight = f"生成模式：本地规则回退；已尝试 LLM，因 {reason_text} 回退。"
+    else:
+        generation_mode_label = "本地规则回退（LLM 未启用）"
+        generation_highlight = "生成模式：本地规则回退；LLM 未启用。"
+    type_summary_label = format_question_type_summary(type_summary)
+    highlights = [
+        generation_highlight,
+        f"已生成 {len(questions)} 道面试模拟题。",
+        f"题型分布：{type_summary_label}。",
+        "每题包含正确答案、解析、来源岗位要求、source_refs 和风险提示。",
     ]
-    for question in questions:
-        lines.extend(
-            [
-                f"- Q{question.get('question_id')}: {question.get('question')}",
-                f"  - 考察点：{question.get('intent') or question.get('requirement')}",
-            ]
-        )
-    lines.extend(["", "## 回答边界", *[f"- {item}" for item in session.get("safety_notes", [])]])
-    content = "\n".join(lines)
+    if fallback_detail:
+        highlights.append(f"回退说明：{fallback_detail}")
+    if skill_areas:
+        highlights.append(f"覆盖方向：{'、'.join(skill_areas)}。")
     return {
         "artifact_id": build_artifact_id("interview_session"),
         "type": "interview_session",
         "title": "面试模拟卡片",
-        "description": f"已生成 {len(questions)} 个面试问题。",
+        "description": f"已生成 {len(questions)} 道题，默认以选择题和判断题为主。",
         "query": query,
         "scope_note": SCOPE_NOTE,
         "content_preview": content[:500],
         "content_markdown": content,
-        "warnings": response.get("warnings", []),
+        "highlights": highlights,
+        "metrics": {
+            "question_count": len(questions),
+            "generation_mode": generation_mode_label,
+            **{key: value for key, value in type_summary.items() if value > 0},
+        },
+        "generation_mode": generation_mode,
+        "generation_model": generation_model,
+        "generation_seconds": session.get("generation_seconds", response.get("generation_seconds", 0.0)),
+        "llm_attempted": llm_attempted,
+        "llm_repair_attempted": llm_repair_attempted,
+        "fallback_reason": fallback_reason,
+        "fallback_detail": fallback_detail,
+        "validation_errors": validation_errors,
+        "question_type_summary": type_summary,
+        "skill_areas": skill_areas,
+        "session_payload": response,
+        "warnings": filter_interview_warnings(response.get("warnings", [])),
         "actions": [
             {"label": "下载 Markdown", "kind": "download_markdown"},
             {"label": "进入求职 Agent", "kind": "open_job_agent"},
@@ -319,25 +527,168 @@ def build_interview_artifact(query: str) -> dict | None:
     }
 
 
-def build_answer_note(artifacts: list[dict], notices: list[str]) -> str:
-    lines = ["**求职 Agent 工具结果**", "", SCOPE_NOTE]
-    if artifacts:
-        lines.extend(["", "已生成以下可审核卡片："])
-        for artifact in artifacts:
-            path = artifact.get("relative_path")
-            path_note = f"（{path}）" if path else ""
-            lines.append(f"- {artifact['title']}：{artifact['description']}{path_note}")
-    if notices:
-        lines.extend(["", "需要注意："])
-        lines.extend(f"- {notice}" for notice in notices)
+def summarize_question_types(questions: list[dict]) -> dict:
+    summary = {"single_choice": 0, "multiple_choice": 0, "true_false": 0}
+    for question in questions:
+        question_type = question.get("type")
+        if question_type in summary:
+            summary[question_type] += 1
+    return summary
+
+
+def format_question_type_summary(summary: dict) -> str:
+    labels = {
+        "single_choice": "单选题",
+        "multiple_choice": "多选题",
+        "true_false": "判断题",
+    }
+    parts = [f"{labels[key]} {value} 道" for key, value in summary.items() if value > 0]
+    return "，".join(parts) if parts else "暂无题目"
+
+
+def filter_interview_warnings(warnings: list[str]) -> list[str]:
+    blocked_terms = ("写入简历", "简历差异", "简历草稿", "覆盖真实简历")
+    return [warning for warning in warnings if not any(term in warning for term in blocked_terms)]
+
+
+def build_interview_markdown(questions: list[dict], session: dict) -> str:
+    lines = [
+        "# 面试模拟",
+        "",
+        "## 摘要",
+        "",
+        f"- 共 {len(questions)} 题，默认以选择题和判断题为主。",
+        f"- 生成模式：{format_interview_generation_mode(session)}",
+        "- 每题都包含答案、解析、来源岗位要求和风险提示。",
+        "",
+        "## 题目",
+    ]
+    for question in questions:
+        lines.extend(render_interview_question_markdown(question))
+    lines.extend(["", "## 回答边界", *[f"- {item}" for item in session.get("safety_notes", [])]])
+    lines.extend(["", "## 来源与安全边界", "", f"- {SCOPE_NOTE}", f"- {SAFETY_NOTE}"])
+    return "\n".join(lines)
+
+
+def format_interview_generation_mode(session: dict) -> str:
+    if session.get("generation_mode") == "llm":
+        return "LLM 生成"
+    if session.get("llm_attempted"):
+        reason = session.get("fallback_reason") or "未返回原因"
+        detail = session.get("fallback_detail") or "已尝试 LLM，但未通过生成或校验，已回退到本地规则。"
+        return f"本地规则回退（已尝试 LLM；原因：{reason}；说明：{detail}）"
+    return "本地规则回退（LLM 未启用）"
+
+
+def render_interview_question_markdown(question: dict) -> list[str]:
+    question_type_labels = {
+        "single_choice": "单选题",
+        "multiple_choice": "多选题",
+        "true_false": "判断题",
+    }
+    question_type = question_type_labels.get(question.get("type"), "面试题")
+    correct_answer = question.get("correct_answer", "")
+    if isinstance(correct_answer, list):
+        correct_answer_text = "、".join(str(item) for item in correct_answer)
+    else:
+        correct_answer_text = str(correct_answer)
+    lines = [
+        "",
+        f"### Q{question.get('question_id')} {question_type}",
+        "",
+        question.get("question", ""),
+    ]
+    options = question.get("options") or []
+    if options:
+        lines.extend(["", "选项："])
+        lines.extend(f"- {option.get('key')}. {option.get('text')}" for option in options)
     lines.extend(
         [
             "",
-            "安全边界：不自动投递，不覆盖真实简历，不绕过登录、验证码、反爬或平台限制。",
+            f"- 正确答案：{correct_answer_text}",
+            f"- 解释：{question.get('explanation', '')}",
+            f"- 来源岗位要求：{question.get('source_requirement') or question.get('requirement', '')}",
+            f"- 风险提示：{question.get('risk_hint') or question.get('risk_reminder', '')}",
         ]
     )
+    source_refs = question.get("source_refs") or []
+    if source_refs:
+        lines.extend(["", "source_refs："])
+        for ref in source_refs:
+            lines.append(
+                f"- {ref.get('type', 'job_description')} | {ref.get('source_id', '')} | "
+                f"{ref.get('relative_path', '')} | {ref.get('quote', '')}"
+            )
+    return lines
+
+
+def build_answer_note(artifacts: list[dict], notices: list[str]) -> str:
+    if artifacts:
+        artifact = artifacts[0]
+        if artifact["type"] == "resume_revision_draft":
+            return build_resume_revision_answer(artifact)
+        if artifact["type"] == "interview_session":
+            return build_interview_answer(artifact)
+        if artifact["type"] == "job_summary":
+            return build_summary_answer(artifact)
+        if artifact["type"] == "job_match_report":
+            return build_report_answer(artifact)
+
+    if notices:
+        return "\n".join(["没有生成可审核卡片。", "", *[f"- {notice}" for notice in notices], "", SAFETY_NOTE])
+    return ""
+
+
+def build_resume_revision_answer(artifact: dict) -> str:
+    lines = [
+        "我已经生成了简历不足分析和优化草稿。核心结论是：当前资料还不足以直接把新能力写进正式简历，需要先补证据。",
+        "",
+        "主要结果：",
+    ]
+    lines.extend(f"- {item}" for item in artifact.get("highlights", [])[:5])
+    lines.extend(["", "草稿已保存为独立可审核副本，可在卡片中下载或进入审核；不会覆盖真实简历。", SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def build_interview_answer(artifact: dict) -> str:
+    if artifact.get("generation_mode") == "llm":
+        mode_line = "本次题目由 LLM 生成，并已通过结构化校验。"
+    elif artifact.get("llm_attempted"):
+        mode_line = f"系统已尝试 LLM，但因 {artifact.get('fallback_reason') or '未返回原因'} 回退到本地规则；卡片中保留了诊断说明。"
+    else:
+        mode_line = "LLM 面试出题未启用，本次使用本地规则生成。"
+    lines = [
+        "我已经按目标岗位生成了面试模拟题，默认以选择题和判断题为主，方便你先快速自测。",
+        mode_line,
+        "",
+        "主要结果：",
+    ]
+    lines.extend(f"- {item}" for item in artifact.get("highlights", [])[:4])
+    lines.extend(["", "你可以在卡片中下载 Markdown，或进入求职 Agent 继续做题和查看反馈。", SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def build_summary_answer(artifact: dict) -> str:
+    lines = ["已基于当前本地资料库完成岗位汇总。", "", "主要结果："]
+    lines.extend(f"- {item}" for item in artifact.get("highlights", [])[:4])
+    lines.extend(["", SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def build_report_answer(artifact: dict) -> str:
+    lines = ["已生成岗位匹配报告。", "", "主要结果："]
+    lines.extend(f"- {item}" for item in artifact.get("highlights", [])[:4])
+    lines.extend(["", "报告已保存为独立副本，可下载或进入审核。", SAFETY_NOTE])
     return "\n".join(lines)
 
 
 def build_artifact_id(prefix: str) -> str:
     return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def dedupe(values: list[str]) -> list[str]:
+    results = []
+    for value in values:
+        if value and value not in results:
+            results.append(value)
+    return results

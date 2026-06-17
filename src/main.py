@@ -271,19 +271,26 @@ def truncate_text(text: str, max_chars: int = MAX_SECTION_CHARS) -> str:
     return text[:max_chars].rstrip() + "\n...（内容已截断）"
 
 
-def ask_model_messages_result(api_key: str, messages: list[dict], temperature: float = 0.3) -> dict:
+def ask_model_messages_result(
+    api_key: str,
+    messages: list[dict],
+    temperature: float = 0.3,
+    model: str | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": CHAT_MODEL,
+        "model": model or CHAT_MODEL,
         "messages": messages,
-        "max_tokens": CHAT_MAX_TOKENS,
+        "max_tokens": max_tokens or CHAT_MAX_TOKENS,
         "temperature": temperature,
     }
 
-    response = requests.post(CHAT_API_URL, headers=headers, json=payload, timeout=REQUEST_TIMEOUT)
+    response = requests.post(CHAT_API_URL, headers=headers, json=payload, timeout=timeout or REQUEST_TIMEOUT)
     response.raise_for_status()
 
     data = response.json()
@@ -305,6 +312,49 @@ def ask_model_messages_result(api_key: str, messages: list[dict], temperature: f
             }
 
     raise RuntimeError(f"无法解析模型返回结果：{data}")
+
+
+def is_llm_interview_enabled() -> bool:
+    load_local_env()
+    value = os.getenv("LOCAL_RAG_LLM_INTERVIEW_ENABLED", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def should_send_resume_to_llm_interview() -> bool:
+    load_local_env()
+    value = os.getenv("LOCAL_RAG_LLM_INTERVIEW_SEND_RESUME", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def get_llm_interview_model() -> str:
+    load_local_env()
+    return os.getenv("LOCAL_RAG_LLM_INTERVIEW_MODEL", "").strip() or CHAT_MODEL
+
+
+def get_llm_interview_max_tokens() -> int:
+    load_local_env()
+    raw_value = os.getenv("LOCAL_RAG_LLM_INTERVIEW_MAX_TOKENS", "").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        value = 3200
+    return max(1200, min(value, 6000))
+
+
+def get_llm_interview_timeout_seconds() -> float:
+    load_local_env()
+    raw_value = os.getenv("LOCAL_RAG_LLM_INTERVIEW_TIMEOUT_SECONDS", "").strip()
+    try:
+        value = float(raw_value)
+    except ValueError:
+        value = 45.0
+    return max(10.0, min(value, 90.0))
+
+
+def is_llm_interview_repair_enabled() -> bool:
+    load_local_env()
+    value = os.getenv("LOCAL_RAG_LLM_INTERVIEW_REPAIR_ENABLED", "1").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def ask_model_result(api_key: str, prompt: str) -> dict:

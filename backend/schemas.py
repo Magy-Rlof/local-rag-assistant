@@ -62,6 +62,21 @@ class ChatArtifact(BaseModel):
     content_markdown: str = ""
     review_status: str = ""
     warnings: list[str] = Field(default_factory=list)
+    highlights: list[str] = Field(default_factory=list)
+    metrics: dict[str, int | str | bool] = Field(default_factory=dict)
+    generation_mode: str = ""
+    generation_model: str = ""
+    generation_seconds: float = 0.0
+    llm_attempted: bool = False
+    llm_repair_attempted: bool = False
+    fallback_reason: str = ""
+    fallback_detail: str = ""
+    validation_errors: list[str] = Field(default_factory=list)
+    resume_evidence_status: str = ""
+    resume_evidence_status_label: str = ""
+    question_type_summary: dict[str, int] = Field(default_factory=dict)
+    skill_areas: list[str] = Field(default_factory=list)
+    session_payload: dict = Field(default_factory=dict)
     actions: list[ChatArtifactAction] = Field(default_factory=list)
 
 
@@ -521,10 +536,28 @@ class InterviewQuestion(BaseModel):
     intent: str
     answer_checkpoints: list[str]
     risk_reminder: str
+    type: str = "open"
+    difficulty: str = ""
+    skill_area: str = ""
+    options: list[dict[str, str]] = Field(default_factory=list)
+    correct_answer: str | list[str] = ""
+    explanation: str = ""
+    source_requirement_id: str = ""
+    source_requirement: str = ""
+    source_refs: list[dict[str, str]] = Field(default_factory=list)
+    risk_hint: str = ""
 
 
 class InterviewSession(BaseModel):
     target_confirmation: JobTargetConfirmation
+    generation_mode: str = ""
+    generation_model: str = ""
+    generation_seconds: float = 0.0
+    llm_attempted: bool = False
+    llm_repair_attempted: bool = False
+    fallback_reason: str = ""
+    fallback_detail: str = ""
+    validation_errors: list[str] = Field(default_factory=list)
     questions: list[InterviewQuestion]
     answer_guidance: list[str]
     safety_notes: list[str]
@@ -537,6 +570,14 @@ class JobInterviewSessionResponse(BaseModel):
     current_resume: DocumentInfo | None
     session: InterviewSession | None
     warnings: list[str]
+    generation_mode: str = ""
+    generation_model: str = ""
+    generation_seconds: float = 0.0
+    llm_attempted: bool = False
+    llm_repair_attempted: bool = False
+    fallback_reason: str = ""
+    fallback_detail: str = ""
+    validation_errors: list[str] = Field(default_factory=list)
 
 
 class InterviewFeedbackRequest(BaseModel):
