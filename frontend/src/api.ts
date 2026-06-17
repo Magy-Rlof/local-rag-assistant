@@ -18,6 +18,27 @@ export type SourceInfo = {
   score: number | null;
 };
 
+export type ChatArtifactAction = {
+  label: string;
+  kind: "download_markdown" | "open_job_agent";
+};
+
+export type ChatArtifact = {
+  artifact_id: string;
+  type: "job_summary" | "job_match_report" | "resume_revision_draft" | "interview_session";
+  title: string;
+  description: string;
+  query: string;
+  scope_note: string;
+  file_name: string;
+  relative_path: string;
+  content_preview: string;
+  content_markdown: string;
+  review_status: string;
+  warnings: string[];
+  actions: ChatArtifactAction[];
+};
+
 export type AskResponse = {
   answer: string;
   truncated: boolean;
@@ -25,6 +46,7 @@ export type AskResponse = {
   retrieval_seconds: number;
   generation_seconds: number;
   mode: "rag" | "chat" | "system";
+  artifacts: ChatArtifact[];
 };
 
 export type ChatMessage = {
@@ -52,6 +74,420 @@ export type IndexResponse = {
   collection_name: string;
   storage_path: string;
   logs: string[];
+};
+
+export type JobBasicInfo = {
+  title: string;
+  company: string;
+  source: string;
+  source_job_id: string;
+  source_url: string;
+  source_file: string;
+};
+
+export type JobTargetConfirmation = {
+  title: string;
+  company: string;
+  source: string;
+  source_job_id: string;
+  source_url: string;
+  source_file: string;
+};
+
+export type CurrentMaterialMatchPoint = {
+  point: string;
+  evidence: string;
+  boundary: string;
+};
+
+export type EvidenceRequiredCandidate = {
+  candidate_direction: string;
+  required_evidence: string;
+};
+
+export type InterviewOnlyCandidate = {
+  topic: string;
+  usage: string;
+};
+
+export type CannotClaimCandidate = {
+  claim: string;
+  reason: string;
+  source_requirement: string;
+};
+
+export type JobMatchDraft = {
+  target_confirmation: JobTargetConfirmation;
+  job_core_requirements: string[];
+  job_core_responsibilities: string[];
+  current_material_match_points: CurrentMaterialMatchPoint[];
+  resume_revision_candidates: {
+    can_write_to_resume: string[];
+    requires_evidence_before_resume: EvidenceRequiredCandidate[];
+    interview_only: InterviewOnlyCandidate[];
+    cannot_claim: CannotClaimCandidate[];
+    resume_state: string;
+  };
+  interview_questions: string[];
+  evidence_gaps: string[];
+  safety_notes: string[];
+};
+
+export type JobMatchDraftResponse = {
+  matched: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  draft: JobMatchDraft | null;
+  warnings: string[];
+};
+
+export type JobMatchDraftExportResponse = {
+  exported: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  content_preview: string;
+  warnings: string[];
+};
+
+export type JobMatchDraftExportFile = {
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  modified_at: string;
+};
+
+export type JobMatchDraftExportListResponse = {
+  drafts: JobMatchDraftExportFile[];
+  count: number;
+  directory: string;
+  warnings: string[];
+};
+
+export type JobMatchDraftExportContentResponse = JobMatchDraftExportFile & {
+  content: string;
+};
+
+export type JobMatchDraftExportDeleteResponse = {
+  deleted: boolean;
+  file_name: string;
+  relative_path: string;
+  warnings: string[];
+};
+
+export type ResumeRevisionDraftExportResponse = {
+  exported: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  content_preview: string;
+  warnings: string[];
+};
+
+export type ResumeRevisionDraftExportFile = {
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  modified_at: string;
+};
+
+export type ResumeRevisionDraftExportListResponse = {
+  drafts: ResumeRevisionDraftExportFile[];
+  count: number;
+  directory: string;
+  warnings: string[];
+};
+
+export type ResumeRevisionDraftExportContentResponse = ResumeRevisionDraftExportFile & {
+  content: string;
+};
+
+export type ResumeRevisionDraftExportDeleteResponse = {
+  deleted: boolean;
+  file_name: string;
+  relative_path: string;
+  warnings: string[];
+};
+
+export type ResumeRevisionCompareResponse = {
+  file_name: string;
+  relative_path: string;
+  current_resume: DocumentInfo | null;
+  current_resume_readable: boolean;
+  current_resume_content: string;
+  resume_diff_content: string;
+  warnings: string[];
+};
+
+export type ResumeWriteReviewQueueResponse = {
+  queued: boolean;
+  source_diff_file_name: string;
+  source_diff_relative_path: string;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  content_preview: string;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+  warnings: string[];
+};
+
+export type ResumeWriteReviewQueueFile = {
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  modified_at: string;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+  source_diff_file_name: string;
+  source_diff_relative_path: string;
+};
+
+export type ResumeWriteReviewQueueListResponse = {
+  items: ResumeWriteReviewQueueFile[];
+  count: number;
+  directory: string;
+  warnings: string[];
+};
+
+export type ResumeWriteReviewQueueContentResponse = ResumeWriteReviewQueueFile & {
+  content: string;
+};
+
+export type ResumeWriteReviewUpdateResponse = ResumeWriteReviewQueueContentResponse & {
+  warnings: string[];
+};
+
+export type ResumeWriteReviewDeleteResponse = {
+  deleted: boolean;
+  file_name: string;
+  relative_path: string;
+  warnings: string[];
+};
+
+export type JobMatchReportExportResponse = {
+  exported: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  content_preview: string;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+  warnings: string[];
+};
+
+export type JobMatchReportExportFile = {
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  modified_at: string;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+};
+
+export type JobMatchReportExportListResponse = {
+  reports: JobMatchReportExportFile[];
+  count: number;
+  directory: string;
+  warnings: string[];
+};
+
+export type JobMatchReportExportContentResponse = JobMatchReportExportFile & {
+  content: string;
+};
+
+export type JobMatchReportExportDeleteResponse = {
+  deleted: boolean;
+  file_name: string;
+  relative_path: string;
+  warnings: string[];
+};
+
+export type JobMatchReportReviewUpdateResponse = JobMatchReportExportContentResponse & {
+  warnings: string[];
+};
+
+export type JobMatchBatchReportItem = {
+  query: string;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  target_job: JobBasicInfo | null;
+};
+
+export type JobMatchBatchReportFailure = {
+  query: string;
+  error: string;
+};
+
+export type JobMatchReportBatchQueueResponse = {
+  queued: boolean;
+  batch_id: string;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  query_count: number;
+  created_count: number;
+  failed_count: number;
+  generated_reports: JobMatchBatchReportItem[];
+  failures: JobMatchBatchReportFailure[];
+  content_preview: string;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+  warnings: string[];
+};
+
+export type JobMatchReportBatchQueueFile = {
+  batch_id: string;
+  file_name: string;
+  relative_path: string;
+  size_bytes: number;
+  modified_at: string;
+  query_count: number;
+  created_count: number;
+  failed_count: number;
+  review_status: string;
+  review_label: string;
+  review_note: string;
+  review_updated_at: string;
+};
+
+export type JobMatchReportBatchQueueListResponse = {
+  batches: JobMatchReportBatchQueueFile[];
+  count: number;
+  directory: string;
+  warnings: string[];
+};
+
+export type JobMatchReportBatchQueueContentResponse = JobMatchReportBatchQueueFile & {
+  queries: string[];
+  generated_reports: JobMatchBatchReportItem[];
+  failures: JobMatchBatchReportFailure[];
+  content: string;
+};
+
+export type JobMatchReportBatchReviewUpdateResponse = JobMatchReportBatchQueueContentResponse & {
+  warnings: string[];
+};
+
+export type JobMatchReportBatchDeleteResponse = {
+  deleted: boolean;
+  file_name: string;
+  relative_path: string;
+  warnings: string[];
+};
+
+export type InterviewQuestion = {
+  question_id: number;
+  question: string;
+  requirement: string;
+  intent: string;
+  answer_checkpoints: string[];
+  risk_reminder: string;
+};
+
+export type InterviewSession = {
+  target_confirmation: JobTargetConfirmation;
+  questions: InterviewQuestion[];
+  answer_guidance: string[];
+  safety_notes: string[];
+};
+
+export type JobInterviewSessionResponse = {
+  matched: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  session: InterviewSession | null;
+  warnings: string[];
+};
+
+export type InterviewFeedback = {
+  summary: string;
+  clarity: string;
+  evidence_strength: string;
+  boundary_risk: string;
+  strengths: string[];
+  improvements: string[];
+  risk_flags: string[];
+  suggested_next_answer_shape: string[];
+};
+
+export type JobInterviewFeedbackResponse = {
+  matched: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  question: InterviewQuestion | null;
+  feedback: InterviewFeedback | null;
+  warnings: string[];
+};
+
+export type AgentStatusItem = {
+  step: string;
+  label: string;
+  status: string;
+  detail: string;
+};
+
+export type AgentAction = {
+  action: string;
+  label: string;
+  endpoint: string;
+};
+
+export type DisabledAgentAction = {
+  action: string;
+  reason: string;
+};
+
+export type JobAgentSummaryResponse = {
+  matched: boolean;
+  query: string;
+  target_job: JobBasicInfo | null;
+  current_resume: DocumentInfo | null;
+  summary: {
+    target_confirmation: JobTargetConfirmation;
+    pipeline_status: AgentStatusItem[];
+    available_actions: AgentAction[];
+    disabled_actions: DisabledAgentAction[];
+    draft_preview: {
+      requirements_count: number;
+      responsibilities_count: number;
+      can_write_count: number;
+      requires_evidence_count: number;
+      interview_only_count: number;
+      cannot_claim_count: number;
+      evidence_gaps: string[];
+    };
+    interview_preview: {
+      question_count: number;
+      first_question: string;
+      answer_guidance: string[];
+    };
+    safety_notes: string[];
+    recommended_next_steps: string[];
+  } | null;
+  warnings: string[];
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -116,6 +552,7 @@ export async function askQuestionStream(
           retrieval_seconds: event.retrieval_seconds ?? 0,
           generation_seconds: event.generation_seconds ?? 0,
           mode: event.mode ?? "chat",
+          artifacts: event.artifacts ?? [],
         };
         callbacks.onDone?.(finalResponse);
       } else if (event.event === "error") {
@@ -134,6 +571,7 @@ export async function askQuestionStream(
         retrieval_seconds: event.retrieval_seconds ?? 0,
         generation_seconds: event.generation_seconds ?? 0,
         mode: event.mode ?? "chat",
+        artifacts: event.artifacts ?? [],
       };
       callbacks.onDone?.(finalResponse);
     } else if (event.event === "error") {
@@ -218,4 +656,214 @@ export async function buildIndex(): Promise<IndexResponse> {
     method: "POST"
   });
   return parseResponse<IndexResponse>(response);
+}
+
+export async function buildJobAgentSummary(query: string): Promise<JobAgentSummaryResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/agent/summary?query=${encodeURIComponent(query)}`);
+  return parseResponse<JobAgentSummaryResponse>(response);
+}
+
+export async function buildJobMatchDraft(query: string): Promise<JobMatchDraftResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/draft?query=${encodeURIComponent(query)}`);
+  return parseResponse<JobMatchDraftResponse>(response);
+}
+
+export async function exportJobMatchDraft(query: string, note: string): Promise<JobMatchDraftExportResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/draft/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, note, confirm_save: true }),
+  });
+  return parseResponse<JobMatchDraftExportResponse>(response);
+}
+
+export async function listJobMatchDraftExports(): Promise<JobMatchDraftExportListResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/draft/exports`);
+  return parseResponse<JobMatchDraftExportListResponse>(response);
+}
+
+export async function readJobMatchDraftExport(fileName: string): Promise<JobMatchDraftExportContentResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/draft/exports/${encodeURIComponent(fileName)}`);
+  return parseResponse<JobMatchDraftExportContentResponse>(response);
+}
+
+export async function deleteJobMatchDraftExport(fileName: string): Promise<JobMatchDraftExportDeleteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/draft/exports/${encodeURIComponent(fileName)}`, {
+    method: "DELETE",
+  });
+  return parseResponse<JobMatchDraftExportDeleteResponse>(response);
+}
+
+export async function exportResumeRevisionDraft(query: string, note: string): Promise<ResumeRevisionDraftExportResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-diff/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, note, confirm_save: true }),
+  });
+  return parseResponse<ResumeRevisionDraftExportResponse>(response);
+}
+
+export async function listResumeRevisionDraftExports(): Promise<ResumeRevisionDraftExportListResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-diff/exports`);
+  return parseResponse<ResumeRevisionDraftExportListResponse>(response);
+}
+
+export async function readResumeRevisionDraftExport(fileName: string): Promise<ResumeRevisionDraftExportContentResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-diff/exports/${encodeURIComponent(fileName)}`);
+  return parseResponse<ResumeRevisionDraftExportContentResponse>(response);
+}
+
+export async function compareResumeRevisionWithCurrent(fileName: string): Promise<ResumeRevisionCompareResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/jobs/match/resume-diff/exports/${encodeURIComponent(fileName)}/compare-current`
+  );
+  return parseResponse<ResumeRevisionCompareResponse>(response);
+}
+
+export async function deleteResumeRevisionDraftExport(fileName: string): Promise<ResumeRevisionDraftExportDeleteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-diff/exports/${encodeURIComponent(fileName)}`, {
+    method: "DELETE",
+  });
+  return parseResponse<ResumeRevisionDraftExportDeleteResponse>(response);
+}
+
+export async function createResumeWriteReviewItem(
+  diffFileName: string,
+  note: string
+): Promise<ResumeWriteReviewQueueResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-write-review/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ diff_file_name: diffFileName, note, confirm_queue: true }),
+  });
+  return parseResponse<ResumeWriteReviewQueueResponse>(response);
+}
+
+export async function listResumeWriteReviewItems(): Promise<ResumeWriteReviewQueueListResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-write-review/queue`);
+  return parseResponse<ResumeWriteReviewQueueListResponse>(response);
+}
+
+export async function readResumeWriteReviewItem(fileName: string): Promise<ResumeWriteReviewQueueContentResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-write-review/queue/${encodeURIComponent(fileName)}`);
+  return parseResponse<ResumeWriteReviewQueueContentResponse>(response);
+}
+
+export async function updateResumeWriteReviewItem(
+  fileName: string,
+  reviewStatus: string,
+  reviewNote: string
+): Promise<ResumeWriteReviewUpdateResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-write-review/queue/${encodeURIComponent(fileName)}/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ review_status: reviewStatus, review_note: reviewNote }),
+  });
+  return parseResponse<ResumeWriteReviewUpdateResponse>(response);
+}
+
+export async function deleteResumeWriteReviewItem(fileName: string): Promise<ResumeWriteReviewDeleteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/resume-write-review/queue/${encodeURIComponent(fileName)}`, {
+    method: "DELETE",
+  });
+  return parseResponse<ResumeWriteReviewDeleteResponse>(response);
+}
+
+export async function exportJobMatchReport(query: string, note: string): Promise<JobMatchReportExportResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, note, confirm_save: true }),
+  });
+  return parseResponse<JobMatchReportExportResponse>(response);
+}
+
+export async function listJobMatchReportExports(): Promise<JobMatchReportExportListResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/exports`);
+  return parseResponse<JobMatchReportExportListResponse>(response);
+}
+
+export async function readJobMatchReportExport(fileName: string): Promise<JobMatchReportExportContentResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/exports/${encodeURIComponent(fileName)}`);
+  return parseResponse<JobMatchReportExportContentResponse>(response);
+}
+
+export async function deleteJobMatchReportExport(fileName: string): Promise<JobMatchReportExportDeleteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/exports/${encodeURIComponent(fileName)}`, {
+    method: "DELETE",
+  });
+  return parseResponse<JobMatchReportExportDeleteResponse>(response);
+}
+
+export async function updateJobMatchReportReview(
+  fileName: string,
+  reviewStatus: string,
+  reviewNote: string
+): Promise<JobMatchReportReviewUpdateResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/exports/${encodeURIComponent(fileName)}/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ review_status: reviewStatus, review_note: reviewNote }),
+  });
+  return parseResponse<JobMatchReportReviewUpdateResponse>(response);
+}
+
+export async function createJobMatchReportBatchQueue(
+  queries: string[],
+  note: string
+): Promise<JobMatchReportBatchQueueResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/batch-queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queries, note, confirm_queue: true }),
+  });
+  return parseResponse<JobMatchReportBatchQueueResponse>(response);
+}
+
+export async function listJobMatchReportBatchQueues(): Promise<JobMatchReportBatchQueueListResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/batch-queue`);
+  return parseResponse<JobMatchReportBatchQueueListResponse>(response);
+}
+
+export async function readJobMatchReportBatchQueue(fileName: string): Promise<JobMatchReportBatchQueueContentResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/batch-queue/${encodeURIComponent(fileName)}`);
+  return parseResponse<JobMatchReportBatchQueueContentResponse>(response);
+}
+
+export async function updateJobMatchReportBatchReview(
+  fileName: string,
+  reviewStatus: string,
+  reviewNote: string
+): Promise<JobMatchReportBatchReviewUpdateResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/batch-queue/${encodeURIComponent(fileName)}/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ review_status: reviewStatus, review_note: reviewNote }),
+  });
+  return parseResponse<JobMatchReportBatchReviewUpdateResponse>(response);
+}
+
+export async function deleteJobMatchReportBatchQueue(fileName: string): Promise<JobMatchReportBatchDeleteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/match/report/batch-queue/${encodeURIComponent(fileName)}`, {
+    method: "DELETE",
+  });
+  return parseResponse<JobMatchReportBatchDeleteResponse>(response);
+}
+
+export async function buildJobInterviewSession(query: string): Promise<JobInterviewSessionResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/interview/session?query=${encodeURIComponent(query)}`);
+  return parseResponse<JobInterviewSessionResponse>(response);
+}
+
+export async function buildJobInterviewFeedback(
+  query: string,
+  questionId: number,
+  answer: string
+): Promise<JobInterviewFeedbackResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/jobs/interview/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, question_id: questionId, answer }),
+  });
+  return parseResponse<JobInterviewFeedbackResponse>(response);
 }

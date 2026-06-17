@@ -1,14 +1,19 @@
 import {
+  BriefcaseBusiness,
   CheckCircle2,
   Database,
+  Download,
   FileSearch,
   FileText,
   Library,
   Loader2,
+  MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
+  Save,
   Send,
+  ShieldCheck,
   Trash2,
   Upload,
   type LucideIcon,
@@ -16,23 +21,77 @@ import {
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
+  API_BASE_URL,
   AskResponse,
   CategoryKey,
+  ChatArtifact,
   ChatMessage,
   DocumentInfo,
   IndexResponse,
   askQuestionStream,
   buildIndex,
+  buildJobAgentSummary,
+  buildJobInterviewFeedback,
+  buildJobInterviewSession,
+  buildJobMatchDraft,
+  compareResumeRevisionWithCurrent,
+  createJobMatchReportBatchQueue,
+  createResumeWriteReviewItem,
+  deleteJobMatchReportBatchQueue,
   deleteDocument,
+  deleteJobMatchDraftExport,
+  deleteJobMatchReportExport,
+  deleteResumeRevisionDraftExport,
+  deleteResumeWriteReviewItem,
+  exportJobMatchDraft,
+  exportJobMatchReport,
+  exportResumeRevisionDraft,
   getCurrentResume,
+  JobInterviewFeedbackResponse,
+  JobInterviewSessionResponse,
+  JobAgentSummaryResponse,
+  InterviewQuestion,
+  JobMatchDraftExportFile,
+  JobMatchDraftExportContentResponse,
+  JobMatchReportBatchQueueContentResponse,
+  JobMatchReportBatchQueueFile,
+  JobMatchReportExportFile,
+  JobMatchReportExportContentResponse,
+  JobMatchDraftResponse,
+  listJobMatchDraftExports,
+  listJobMatchReportBatchQueues,
+  listJobMatchReportExports,
+  listResumeRevisionDraftExports,
+  listResumeWriteReviewItems,
   listDocuments,
+  readJobMatchDraftExport,
+  readJobMatchReportBatchQueue,
+  readJobMatchReportExport,
+  readResumeRevisionDraftExport,
+  readResumeWriteReviewItem,
   readDocument,
+  ResumeRevisionCompareResponse,
+  ResumeRevisionDraftExportFile,
+  ResumeRevisionDraftExportContentResponse,
+  ResumeWriteReviewQueueContentResponse,
+  ResumeWriteReviewQueueFile,
   setCurrentResume,
   updateDocument,
+  updateJobMatchReportBatchReview,
+  updateJobMatchReportReview,
+  updateResumeWriteReviewItem,
   uploadDocument,
 } from "./api";
 
-type PageKey = "ask" | "resumes" | "library" | "index";
+type PageKey = "ask" | "agent" | "resumes" | "library" | "index";
+type AgentTabKey = "overview" | "copies" | "interview";
+type AgentLaunch = {
+  token: number;
+  tab: AgentTabKey;
+  query: string;
+  artifactType: ChatArtifact["type"];
+  fileName: string;
+};
 
 type NavItem = {
   key: PageKey;
@@ -40,6 +99,19 @@ type NavItem = {
   description: string;
   icon: LucideIcon;
 };
+
+function formatRequestError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : "";
+  if (
+    message === "Failed to fetch" ||
+    message.includes("Failed to fetch") ||
+    message.includes("NetworkError") ||
+    message.includes("Load failed")
+  ) {
+    return `无法连接后端服务（${API_BASE_URL}）。请确认 local-rag-assistant 后端已启动后再重试。`;
+  }
+  return message || fallback;
+}
 
 type ConversationMessage = {
   id: string;
@@ -50,9 +122,24 @@ type ConversationMessage = {
 
 const navItems: NavItem[] = [
   { key: "ask", label: "问答分析", description: "简历与岗位匹配", icon: FileSearch },
+  { key: "agent", label: "求职 Agent", description: "草稿与面试准备", icon: BriefcaseBusiness },
   { key: "resumes", label: "简历中心", description: "当前简历管理", icon: FileText },
   { key: "library", label: "资料库", description: "行业、岗位与项目", icon: Database },
   { key: "index", label: "索引状态", description: "更新向量索引", icon: RefreshCw },
+];
+
+const reportReviewOptions = [
+  { value: "pending_review", label: "待审核" },
+  { value: "accepted", label: "已采纳" },
+  { value: "rejected", label: "已拒绝" },
+  { value: "needs_evidence", label: "需补证据" },
+];
+
+const resumeWriteReviewOptions = [
+  { value: "pending_review", label: "待审核" },
+  { value: "approved_for_manual_copy", label: "人工采纳候选" },
+  { value: "rejected", label: "已拒绝" },
+  { value: "needs_evidence", label: "需补证据" },
 ];
 
 const categoryMeta: Record<CategoryKey, { title: string; description: string; uploadText: string }> = {
@@ -91,6 +178,18 @@ function App() {
   const [activePage, setActivePage] = useState<PageKey>("ask");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [indexResult, setIndexResult] = useState<IndexResponse | null>(() => loadIndexResult());
+  const [agentLaunch, setAgentLaunch] = useState<AgentLaunch | null>(null);
+
+  function openAgentFromArtifact(artifact: ChatArtifact) {
+    setAgentLaunch({
+      token: Date.now(),
+      tab: getArtifactTargetTab(artifact.type),
+      query: artifact.query,
+      artifactType: artifact.type,
+      fileName: artifact.file_name,
+    });
+    setActivePage("agent");
+  }
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -137,7 +236,8 @@ function App() {
       </aside>
 
       <main className="workspace">
-        {activePage === "ask" && <AskPage />}
+        {activePage === "ask" && <AskPage onOpenAgent={openAgentFromArtifact} />}
+        {activePage === "agent" && <JobAgentPage launch={agentLaunch} />}
         {activePage === "resumes" && <DocumentPage category="resumes" />}
         {activePage === "library" && <KnowledgeBasePage />}
         {activePage === "index" && <IndexPage result={indexResult} setResult={setIndexResult} />}
@@ -146,11 +246,13 @@ function App() {
   );
 }
 
-function AskPage() {
+function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => void }) {
   const [question, setQuestion] = useState("");
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [messages, setMessages] = useState<ConversationMessage[]>(() => loadAskMessages());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedArtifact, setSelectedArtifact] = useState<ChatArtifact | null>(() => loadAskSelectedArtifact());
+  const [showCitations, setShowCitations] = useState(false);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
   const latestResponse = latestAssistantMessage?.response;
@@ -158,6 +260,14 @@ function AskPage() {
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    saveAskMessages(messages);
+  }, [messages]);
+
+  useEffect(() => {
+    saveAskSelectedArtifact(selectedArtifact);
+  }, [selectedArtifact]);
 
   async function submitQuestion() {
     if (loading) return;
@@ -169,6 +279,8 @@ function AskPage() {
 
     setLoading(true);
     setError("");
+    setSelectedArtifact(null);
+    setShowCitations(false);
     const userMessage: ConversationMessage = {
       id: createMessageId(),
       role: "user",
@@ -200,6 +312,7 @@ function AskPage() {
                       retrieval_seconds: meta.retrieval_seconds,
                       generation_seconds: 0,
                       mode: meta.mode,
+                      artifacts: [],
                     },
                   }
                 : message
@@ -222,6 +335,10 @@ function AskPage() {
           );
         },
         onDone: (nextResponse) => {
+          if (nextResponse.artifacts[0]) {
+            setSelectedArtifact(nextResponse.artifacts[0]);
+            setShowCitations(false);
+          }
           setMessages((currentMessages) =>
             currentMessages.map((message) =>
               message.id === assistantMessageId
@@ -235,6 +352,10 @@ function AskPage() {
           );
         },
       });
+      if (finalResponse.artifacts[0]) {
+        setSelectedArtifact(finalResponse.artifacts[0]);
+        setShowCitations(false);
+      }
       setMessages((currentMessages) =>
         currentMessages.map((message) =>
           message.id === assistantMessageId
@@ -247,7 +368,7 @@ function AskPage() {
         )
       );
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "生成回答失败。");
+      setError(formatRequestError(requestError, "生成回答失败。"));
       setMessages((currentMessages) => currentMessages.filter((message) => message.id !== assistantMessageId));
     } finally {
       setLoading(false);
@@ -270,6 +391,8 @@ function AskPage() {
           <button className="secondary-button small-button" onClick={() => {
             setMessages([]);
             setError("");
+            setSelectedArtifact(null);
+            clearAskConversationStorage();
           }}>
             清空对话
           </button>
@@ -315,6 +438,22 @@ function AskPage() {
                         <div className="warning-box compact-alert">回答可能不完整。可以缩小问题范围后重试。</div>
                       )}
                     </div>
+                    {message.role === "assistant" && Boolean(message.response?.artifacts.length) && (
+                      <div className="chat-artifact-stack">
+                        {message.response?.artifacts.map((artifact) => (
+                          <ChatArtifactCard
+                            artifact={artifact}
+                            key={artifact.artifact_id}
+                            selected={selectedArtifact?.artifact_id === artifact.artifact_id}
+                            onSelect={() => {
+                              setSelectedArtifact(artifact);
+                              setShowCitations(false);
+                            }}
+                            onOpenAgent={onOpenAgent}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </article>
                 ))}
                 {loading && messages[messages.length - 1]?.role !== "assistant" && (
@@ -359,7 +498,21 @@ function AskPage() {
           </section>
         </div>
 
-        <aside className="citation-rail">
+        <aside className={`citation-rail ask-side-panel ${selectedArtifact && !showCitations ? "showing-artifact" : ""}`}>
+          <div className="rail-title-row">
+            <div className="rail-title">{selectedArtifact && !showCitations ? "结果预览" : "引用"}</div>
+            <button
+              className="secondary-button small-button"
+              type="button"
+              onClick={() => setShowCitations((current) => !current)}
+            >
+              {showCitations ? "隐藏引用" : "显示引用"}
+            </button>
+          </div>
+          {selectedArtifact && !showCitations && (
+            <ChatArtifactPreview artifact={selectedArtifact} onOpenAgent={onOpenAgent} />
+          )}
+          <div className="citation-content">
           <div className="rail-title">引用</div>
           {!latestResponse?.sources.length && <div className="empty-state compact">暂无引用</div>}
           <div className="source-list">
@@ -371,9 +524,1351 @@ function AskPage() {
               </div>
             ))}
           </div>
+          </div>
         </aside>
       </div>
     </section>
+  );
+}
+
+function ChatArtifactCard({
+  artifact,
+  selected,
+  onSelect,
+  onOpenAgent,
+}: {
+  artifact: ChatArtifact;
+  selected: boolean;
+  onSelect: () => void;
+  onOpenAgent: (artifact: ChatArtifact) => void;
+}) {
+  const warnings = artifact.warnings.filter(Boolean).slice(0, 2);
+
+  function handleAction(action: ChatArtifact["actions"][number]) {
+    if (action.kind === "download_markdown") {
+      downloadChatArtifact(artifact);
+      return;
+    }
+    if (action.kind === "open_job_agent") {
+      onOpenAgent(artifact);
+    }
+  }
+
+  return (
+    <section
+      className={`chat-artifact-card ${artifact.type} ${selected ? "selected" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+    >
+      <div className="artifact-card-header">
+        <div>
+          <div className="artifact-type-label">{formatArtifactType(artifact.type)}</div>
+          <h3>{artifact.title}</h3>
+          <p>{artifact.description}</p>
+        </div>
+        {artifact.file_name && (
+          <span className="artifact-file-name" title={artifact.file_name}>
+            {artifact.file_name}
+          </span>
+        )}
+      </div>
+      <div className="artifact-scope">
+        <ShieldCheck size={15} />
+        <span>{artifact.scope_note}</span>
+      </div>
+      {warnings.length > 0 && (
+        <div className="artifact-warnings">
+          {warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      )}
+      <div className="artifact-actions">
+        {artifact.actions.map((action) => (
+          <button
+            className={action.kind === "open_job_agent" ? "primary-button small-button" : "secondary-button small-button"}
+            key={`${artifact.artifact_id}-${action.kind}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleAction(action);
+            }}
+          >
+            {action.kind === "download_markdown" ? <Download size={15} /> : <BriefcaseBusiness size={15} />}
+            {formatArtifactActionLabel(action, artifact.type)}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ChatArtifactPreview({
+  artifact,
+  onOpenAgent,
+}: {
+  artifact: ChatArtifact;
+  onOpenAgent: (artifact: ChatArtifact) => void;
+}) {
+  return (
+    <div className="artifact-detail-panel">
+      <div className="artifact-detail-header">
+        <div>
+          <div className="artifact-type-label">{formatArtifactType(artifact.type)}</div>
+          <h2>{artifact.title}</h2>
+          <p>{artifact.description}</p>
+        </div>
+      </div>
+      {artifact.file_name && (
+        <div className="artifact-detail-path" title={artifact.file_name}>
+          {artifact.file_name}
+        </div>
+      )}
+      <div className="artifact-scope">
+        <ShieldCheck size={15} />
+        <span>{artifact.scope_note}</span>
+      </div>
+      <div className="artifact-detail-content">
+        <ReactMarkdown>{artifact.content_markdown || artifact.content_preview || "暂无预览内容。"}</ReactMarkdown>
+      </div>
+      <div className="artifact-actions">
+        <button className="secondary-button small-button" type="button" onClick={() => downloadChatArtifact(artifact)}>
+          <Download size={15} />
+          下载 Markdown
+        </button>
+        <button className="primary-button small-button" type="button" onClick={() => onOpenAgent(artifact)}>
+          <BriefcaseBusiness size={15} />
+          {formatArtifactOpenActionLabel(artifact.type)}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function downloadChatArtifact(artifact: ChatArtifact) {
+  const fileName = artifact.file_name || `${artifact.type}-${artifact.artifact_id}.md`;
+  const blob = new Blob([artifact.content_markdown || artifact.content_preview || ""], {
+    type: "text/markdown;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName.endsWith(".md") ? fileName : `${fileName}.md`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function formatArtifactType(type: ChatArtifact["type"]) {
+  switch (type) {
+    case "job_summary":
+      return "岗位汇总";
+    case "job_match_report":
+      return "匹配报告";
+    case "resume_revision_draft":
+      return "简历草稿";
+    case "interview_session":
+      return "面试模拟";
+    default:
+      return "求职卡片";
+  }
+}
+
+function getArtifactTargetTab(type: ChatArtifact["type"]): AgentTabKey {
+  if (type === "interview_session") return "interview";
+  if (type === "job_summary") return "overview";
+  return "copies";
+}
+
+function formatArtifactOpenActionLabel(type: ChatArtifact["type"]) {
+  if (type === "interview_session") return "进入面试模拟";
+  if (type === "job_match_report" || type === "resume_revision_draft") return "进入审核";
+  return "进入求职 Agent";
+}
+
+function formatArtifactActionLabel(action: ChatArtifact["actions"][number], type: ChatArtifact["type"]) {
+  if (action.kind === "download_markdown") return "下载 Markdown";
+  if (action.kind === "open_job_agent") return formatArtifactOpenActionLabel(type);
+  return action.label;
+}
+
+function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
+  const [query, setQuery] = useState("");
+  const [batchQueries, setBatchQueries] = useState("");
+  const [note, setNote] = useState("");
+  const [summary, setSummary] = useState<JobAgentSummaryResponse | null>(null);
+  const [draft, setDraft] = useState<JobMatchDraftResponse | null>(null);
+  const [interviewSession, setInterviewSession] = useState<JobInterviewSessionResponse | null>(null);
+  const [selectedQuestionId, setSelectedQuestionId] = useState<number | null>(null);
+  const [interviewAnswer, setInterviewAnswer] = useState("");
+  const [interviewFeedback, setInterviewFeedback] = useState<JobInterviewFeedbackResponse | null>(null);
+  const [draftFiles, setDraftFiles] = useState<JobMatchDraftExportFile[]>([]);
+  const [selectedDraft, setSelectedDraft] = useState<JobMatchDraftExportContentResponse | null>(null);
+  const [resumeDiffFiles, setResumeDiffFiles] = useState<ResumeRevisionDraftExportFile[]>([]);
+  const [selectedResumeDiff, setSelectedResumeDiff] = useState<ResumeRevisionDraftExportContentResponse | null>(null);
+  const [resumeDiffCompare, setResumeDiffCompare] = useState<ResumeRevisionCompareResponse | null>(null);
+  const [resumeWriteReviewFiles, setResumeWriteReviewFiles] = useState<ResumeWriteReviewQueueFile[]>([]);
+  const [selectedResumeWriteReview, setSelectedResumeWriteReview] = useState<ResumeWriteReviewQueueContentResponse | null>(null);
+  const [resumeWriteReviewStatus, setResumeWriteReviewStatus] = useState("pending_review");
+  const [resumeWriteReviewNote, setResumeWriteReviewNote] = useState("");
+  const [reportFiles, setReportFiles] = useState<JobMatchReportExportFile[]>([]);
+  const [selectedReport, setSelectedReport] = useState<JobMatchReportExportContentResponse | null>(null);
+  const [reportReviewStatus, setReportReviewStatus] = useState("pending_review");
+  const [reportReviewNote, setReportReviewNote] = useState("");
+  const [batchReportFiles, setBatchReportFiles] = useState<JobMatchReportBatchQueueFile[]>([]);
+  const [selectedBatchReport, setSelectedBatchReport] = useState<JobMatchReportBatchQueueContentResponse | null>(null);
+  const [batchReportReviewStatus, setBatchReportReviewStatus] = useState("pending_review");
+  const [batchReportReviewNote, setBatchReportReviewNote] = useState("");
+  const [loadingAction, setLoadingAction] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [activeAgentTab, setActiveAgentTab] = useState<AgentTabKey>("overview");
+
+  useEffect(() => {
+    refreshDraftExports();
+    refreshResumeDiffExports();
+    refreshResumeWriteReviewItems();
+    refreshReportExports();
+    refreshBatchReportQueues();
+  }, []);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(""), 2800);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  useEffect(() => {
+    if (!launch) return;
+    let cancelled = false;
+    if (launch.query) {
+      setQuery(launch.query);
+    }
+
+    async function openLaunchTarget() {
+      if (!launch) return;
+      setActiveAgentTab(launch.tab);
+
+      if (launch.artifactType === "job_match_report" && launch.fileName) {
+        await handleReadReport(launch.fileName);
+      } else if (launch.artifactType === "resume_revision_draft" && launch.fileName) {
+        await handleReadResumeDiff(launch.fileName);
+      } else if (launch.artifactType === "interview_session" && launch.query) {
+        const data = await runAction("interview", () => buildJobInterviewSession(launch.query));
+        if (!cancelled && data) {
+          setInterviewSession(data);
+          setInterviewFeedback(null);
+          setInterviewAnswer("");
+          setSelectedQuestionId(data.session?.questions[0]?.question_id ?? null);
+          setActiveAgentTab("interview");
+        }
+      } else if (launch.artifactType === "job_summary") {
+        setActiveAgentTab("overview");
+      }
+
+      if (!cancelled) {
+        setMessage("已从问答分析打开对应结果。");
+      }
+    }
+
+    openLaunchTarget();
+    return () => {
+      cancelled = true;
+    };
+  }, [launch]);
+
+  async function runAction<T>(action: string, handler: () => Promise<T>) {
+    setLoadingAction(action);
+    setError("");
+    setMessage("");
+    try {
+      return await handler();
+    } catch (requestError) {
+      setError(formatRequestError(requestError, "操作失败。"));
+      return null;
+    } finally {
+      setLoadingAction("");
+    }
+  }
+
+  async function handleBuildSummary() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("summary", () => buildJobAgentSummary(trimmed));
+    if (!data) return;
+    setSummary(data);
+    setInterviewFeedback(null);
+    if (!data.matched) {
+      setDraft(null);
+      setInterviewSession(null);
+      setSelectedQuestionId(null);
+      setError("没有定位到目标岗位。");
+      return;
+    }
+    setActiveAgentTab("overview");
+    setMessage("已定位目标岗位。");
+  }
+
+  async function handleBuildDraft() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("draft", () => buildJobMatchDraft(trimmed));
+    if (!data) return;
+    setDraft(data);
+    if (!data.matched) {
+      setError("没有生成草稿，目标岗位未命中。");
+      return;
+    }
+    setActiveAgentTab("overview");
+    setMessage("已生成可审核草稿预览。");
+  }
+
+  async function handleBuildInterviewSession() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("interview", () => buildJobInterviewSession(trimmed));
+    if (!data) return;
+    setInterviewSession(data);
+    setInterviewFeedback(null);
+    setInterviewAnswer("");
+    if (!data.matched || !data.session?.questions.length) {
+      setSelectedQuestionId(null);
+      setError("没有生成面试问题，目标岗位未命中或岗位要求不足。");
+      return;
+    }
+    setSelectedQuestionId(data.session.questions[0].question_id);
+    setActiveAgentTab("interview");
+    setMessage("已生成面试模拟问题。");
+  }
+
+  async function handleSubmitInterviewAnswer() {
+    const trimmed = query.trim();
+    const answer = interviewAnswer.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    if (!selectedQuestionId) {
+      setError("请先选择一个面试问题。");
+      return;
+    }
+    if (!answer) {
+      setError("请输入面试回答后再提交。");
+      return;
+    }
+    const data = await runAction("feedback", () => buildJobInterviewFeedback(trimmed, selectedQuestionId, answer));
+    if (!data) return;
+    setInterviewFeedback(data);
+    if (!data.matched || !data.feedback) {
+      setError("没有生成反馈，目标岗位未命中。");
+      return;
+    }
+    setMessage("已生成面试回答反馈。");
+  }
+
+  async function handleExportDraft() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("export", () => exportJobMatchDraft(trimmed, note.trim()));
+    if (!data || !data.exported) return;
+    await refreshDraftExports(data.file_name);
+    setMessage("已保存为私有草稿副本。");
+  }
+
+  async function handleExportResumeDiff() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("resume-diff-export", () => exportResumeRevisionDraft(trimmed, note.trim()));
+    if (!data || !data.exported) return;
+    await refreshResumeDiffExports(data.file_name);
+    setMessage("已保存为私有简历差异草稿。真实简历未受影响。");
+  }
+
+  async function handleExportReport() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError("请输入岗位标题、来源 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("report-export", () => exportJobMatchReport(trimmed, note.trim()));
+    if (!data || !data.exported) return;
+    await refreshReportExports(data.file_name);
+    setMessage("已保存为私有求职分析报告。");
+  }
+
+  async function handleCreateBatchReportQueue() {
+    const queries = parseBatchQueries(batchQueries);
+    if (queries.length < 2) {
+      setError("批量报告队列至少需要 2 个唯一岗位 ID、marker 或文件名。");
+      return;
+    }
+    const data = await runAction("batch-report-queue", () => createJobMatchReportBatchQueue(queries, note.trim()));
+    if (!data?.queued) return;
+    await refreshBatchReportQueues(data.file_name);
+    await refreshReportExports();
+    setActiveAgentTab("copies");
+    setMessage(`已生成批量报告队列：${data.created_count} 份报告，${data.failed_count} 个失败项。`);
+  }
+
+  async function refreshDraftExports(nextSelectedFileName?: string) {
+    const data = await runAction("list", () => listJobMatchDraftExports());
+    if (!data) return;
+    setDraftFiles(data.drafts);
+    if (nextSelectedFileName) {
+      await handleReadDraft(nextSelectedFileName);
+    } else if (selectedDraft && !data.drafts.some((item) => item.file_name === selectedDraft.file_name)) {
+      setSelectedDraft(null);
+    }
+  }
+
+  async function handleRefreshCopies() {
+    await refreshDraftExports();
+    await refreshResumeDiffExports();
+    await refreshResumeWriteReviewItems();
+    await refreshReportExports();
+    await refreshBatchReportQueues();
+    setActiveAgentTab("copies");
+  }
+
+  async function handleReadDraft(fileName: string) {
+    const data = await runAction("read", () => readJobMatchDraftExport(fileName));
+    if (!data) return;
+    setSelectedResumeDiff(null);
+    setResumeDiffCompare(null);
+    setSelectedResumeWriteReview(null);
+    setSelectedReport(null);
+    setSelectedBatchReport(null);
+    setSelectedDraft(data);
+    setActiveAgentTab("copies");
+  }
+
+  async function handleDeleteDraft(fileName: string) {
+    const confirmed = window.confirm(`确认删除草稿副本 ${fileName}？`);
+    if (!confirmed) return;
+    const data = await runAction("delete", () => deleteJobMatchDraftExport(fileName));
+    if (!data?.deleted) return;
+    setSelectedDraft((current) => (current?.file_name === fileName ? null : current));
+    await refreshDraftExports();
+    setMessage("已删除草稿副本。真实简历未受影响。");
+  }
+
+  async function refreshResumeWriteReviewItems(nextSelectedFileName?: string) {
+    const data = await runAction("resume-write-list", () => listResumeWriteReviewItems());
+    if (!data) return;
+    setResumeWriteReviewFiles(data.items);
+    if (nextSelectedFileName) {
+      await handleReadResumeWriteReview(nextSelectedFileName);
+    } else if (selectedResumeWriteReview && !data.items.some((item) => item.file_name === selectedResumeWriteReview.file_name)) {
+      setSelectedResumeWriteReview(null);
+    }
+  }
+
+  async function refreshResumeDiffExports(nextSelectedFileName?: string) {
+    const data = await runAction("resume-diff-list", () => listResumeRevisionDraftExports());
+    if (!data) return;
+    setResumeDiffFiles(data.drafts);
+    if (nextSelectedFileName) {
+      await handleReadResumeDiff(nextSelectedFileName);
+    } else if (selectedResumeDiff && !data.drafts.some((item) => item.file_name === selectedResumeDiff.file_name)) {
+      setSelectedResumeDiff(null);
+      setResumeDiffCompare(null);
+    }
+  }
+
+  async function handleReadResumeDiff(fileName: string) {
+    const data = await runAction("resume-diff-read", () => readResumeRevisionDraftExport(fileName));
+    if (!data) return;
+    setSelectedDraft(null);
+    setSelectedResumeWriteReview(null);
+    setSelectedReport(null);
+    setSelectedBatchReport(null);
+    setResumeDiffCompare(null);
+    setSelectedResumeDiff(data);
+    setActiveAgentTab("copies");
+  }
+
+  async function handleCompareResumeDiff() {
+    if (!selectedResumeDiff) return;
+    if (resumeDiffCompare?.file_name === selectedResumeDiff.file_name) {
+      setResumeDiffCompare(null);
+      setMessage("已还原为仅查看简历差异草稿。");
+      return;
+    }
+    const data = await runAction("resume-diff-compare", () => compareResumeRevisionWithCurrent(selectedResumeDiff.file_name));
+    if (!data) return;
+    setResumeDiffCompare(data);
+    setMessage("已生成当前简历与差异草稿的只读对比。");
+  }
+
+  async function handleCreateResumeWriteReview() {
+    if (!selectedResumeDiff) return;
+    const data = await runAction("resume-write-queue", () =>
+      createResumeWriteReviewItem(selectedResumeDiff.file_name, note.trim())
+    );
+    if (!data?.queued) return;
+    await refreshResumeWriteReviewItems(data.file_name);
+    setMessage("已加入写回前审核队列。真实简历未受影响。");
+  }
+
+  async function handleDeleteResumeDiff(fileName: string) {
+    const confirmed = window.confirm(`确认删除简历差异草稿 ${fileName}？`);
+    if (!confirmed) return;
+    const data = await runAction("resume-diff-delete", () => deleteResumeRevisionDraftExport(fileName));
+    if (!data?.deleted) return;
+    setSelectedResumeDiff((current) => (current?.file_name === fileName ? null : current));
+    setResumeDiffCompare((current) => (current?.file_name === fileName ? null : current));
+    await refreshResumeDiffExports();
+    setMessage("已删除简历差异草稿。真实简历未受影响。");
+  }
+
+  async function handleReadResumeWriteReview(fileName: string) {
+    const data = await runAction("resume-write-read", () => readResumeWriteReviewItem(fileName));
+    if (!data) return;
+    setSelectedDraft(null);
+    setSelectedResumeDiff(null);
+    setResumeDiffCompare(null);
+    setSelectedReport(null);
+    setSelectedBatchReport(null);
+    setSelectedResumeWriteReview(data);
+    setResumeWriteReviewStatus(data.review_status);
+    setResumeWriteReviewNote(data.review_note);
+    setActiveAgentTab("copies");
+  }
+
+  async function handleUpdateResumeWriteReview() {
+    if (!selectedResumeWriteReview) return;
+    const data = await runAction("resume-write-review", () =>
+      updateResumeWriteReviewItem(selectedResumeWriteReview.file_name, resumeWriteReviewStatus, resumeWriteReviewNote)
+    );
+    if (!data) return;
+    setSelectedResumeWriteReview(data);
+    setResumeWriteReviewStatus(data.review_status);
+    setResumeWriteReviewNote(data.review_note);
+    await refreshResumeWriteReviewItems();
+    setMessage("已更新写回前审核状态。真实简历未受影响。");
+  }
+
+  async function handleDeleteResumeWriteReview(fileName: string) {
+    const confirmed = window.confirm(`确认删除写回前审核项 ${fileName}？`);
+    if (!confirmed) return;
+    const data = await runAction("resume-write-delete", () => deleteResumeWriteReviewItem(fileName));
+    if (!data?.deleted) return;
+    setSelectedResumeWriteReview((current) => (current?.file_name === fileName ? null : current));
+    await refreshResumeWriteReviewItems();
+    setMessage("已删除写回前审核项。真实简历未受影响。");
+  }
+
+  async function refreshReportExports(nextSelectedFileName?: string) {
+    const data = await runAction("report-list", () => listJobMatchReportExports());
+    if (!data) return;
+    setReportFiles(data.reports);
+    if (nextSelectedFileName) {
+      await handleReadReport(nextSelectedFileName);
+    } else if (selectedReport && !data.reports.some((item) => item.file_name === selectedReport.file_name)) {
+      setSelectedReport(null);
+    }
+  }
+
+  async function handleReadReport(fileName: string) {
+    const data = await runAction("report-read", () => readJobMatchReportExport(fileName));
+    if (!data) return;
+    setSelectedDraft(null);
+    setSelectedResumeDiff(null);
+    setResumeDiffCompare(null);
+    setSelectedResumeWriteReview(null);
+    setSelectedBatchReport(null);
+    setSelectedReport(data);
+    setReportReviewStatus(data.review_status);
+    setReportReviewNote(data.review_note);
+    setActiveAgentTab("copies");
+  }
+
+  async function handleDeleteReport(fileName: string) {
+    const confirmed = window.confirm(`确认删除求职分析报告 ${fileName}？`);
+    if (!confirmed) return;
+    const data = await runAction("report-delete", () => deleteJobMatchReportExport(fileName));
+    if (!data?.deleted) return;
+    setSelectedReport((current) => (current?.file_name === fileName ? null : current));
+    await refreshReportExports();
+    setMessage("已删除求职分析报告。真实简历未受影响。");
+  }
+
+  async function handleUpdateReportReview() {
+    if (!selectedReport) return;
+    const data = await runAction("report-review", () =>
+      updateJobMatchReportReview(selectedReport.file_name, reportReviewStatus, reportReviewNote)
+    );
+    if (!data) return;
+    setSelectedReport(data);
+    setReportReviewStatus(data.review_status);
+    setReportReviewNote(data.review_note);
+    await refreshReportExports();
+    setMessage("已更新报告审核状态。真实简历未受影响。");
+  }
+
+  async function refreshBatchReportQueues(nextSelectedFileName?: string) {
+    const data = await runAction("batch-report-list", () => listJobMatchReportBatchQueues());
+    if (!data) return;
+    setBatchReportFiles(data.batches);
+    if (nextSelectedFileName) {
+      await handleReadBatchReport(nextSelectedFileName);
+    } else if (selectedBatchReport && !data.batches.some((item) => item.file_name === selectedBatchReport.file_name)) {
+      setSelectedBatchReport(null);
+    }
+  }
+
+  async function handleReadBatchReport(fileName: string) {
+    const data = await runAction("batch-report-read", () => readJobMatchReportBatchQueue(fileName));
+    if (!data) return;
+    setSelectedDraft(null);
+    setSelectedResumeDiff(null);
+    setResumeDiffCompare(null);
+    setSelectedResumeWriteReview(null);
+    setSelectedReport(null);
+    setSelectedBatchReport(data);
+    setBatchReportReviewStatus(data.review_status);
+    setBatchReportReviewNote(data.review_note);
+    setActiveAgentTab("copies");
+  }
+
+  async function handleUpdateBatchReportReview() {
+    if (!selectedBatchReport) return;
+    const data = await runAction("batch-report-review", () =>
+      updateJobMatchReportBatchReview(selectedBatchReport.file_name, batchReportReviewStatus, batchReportReviewNote)
+    );
+    if (!data) return;
+    setSelectedBatchReport(data);
+    setBatchReportReviewStatus(data.review_status);
+    setBatchReportReviewNote(data.review_note);
+    await refreshBatchReportQueues();
+    setMessage("已更新批量报告队列审核状态。真实简历未受影响。");
+  }
+
+  async function handleDeleteBatchReport(fileName: string) {
+    const confirmed = window.confirm(`确认删除批量报告队列清单 ${fileName}？生成的单岗位报告不会被自动删除。`);
+    if (!confirmed) return;
+    const data = await runAction("batch-report-delete", () => deleteJobMatchReportBatchQueue(fileName));
+    if (!data?.deleted) return;
+    setSelectedBatchReport((current) => (current?.file_name === fileName ? null : current));
+    await refreshBatchReportQueues();
+    setMessage("已删除批量报告队列清单。生成的单岗位报告未被自动删除。");
+  }
+
+  function handleDownloadSelectedCopy() {
+    const selectedCopy = selectedBatchReport ?? selectedReport ?? selectedResumeWriteReview ?? selectedResumeDiff ?? selectedDraft;
+    if (!selectedCopy) return;
+    const blob = new Blob([selectedCopy.content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = selectedCopy.file_name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const busy = Boolean(loadingAction);
+  const selectedCopy = selectedBatchReport ?? selectedReport ?? selectedResumeWriteReview ?? selectedResumeDiff ?? selectedDraft;
+  const copyCount =
+    draftFiles.length + resumeDiffFiles.length + resumeWriteReviewFiles.length + reportFiles.length + batchReportFiles.length;
+  const agentTabs = (
+    <div className="agent-subtabs" role="tablist" aria-label="求职 Agent 工作区">
+      <button
+        type="button"
+        className={`agent-subtab ${activeAgentTab === "overview" ? "active" : ""}`}
+        onClick={() => setActiveAgentTab("overview")}
+        role="tab"
+        aria-selected={activeAgentTab === "overview"}
+      >
+        <BriefcaseBusiness size={17} />
+        <span>总览</span>
+        <small>{summary?.matched ? "已定位" : "状态与草稿"}</small>
+      </button>
+      <button
+        type="button"
+        className={`agent-subtab ${activeAgentTab === "copies" ? "active" : ""}`}
+        onClick={() => setActiveAgentTab("copies")}
+        role="tab"
+        aria-selected={activeAgentTab === "copies"}
+      >
+        <FileText size={17} />
+        <span>草稿审核</span>
+        <small>{copyCount} 个副本</small>
+      </button>
+      <button
+        type="button"
+        className={`agent-subtab ${activeAgentTab === "interview" ? "active" : ""}`}
+        onClick={() => setActiveAgentTab("interview")}
+        role="tab"
+        aria-selected={activeAgentTab === "interview"}
+      >
+        <MessageSquareText size={17} />
+        <span>面试模拟</span>
+        <small>{interviewSession?.session?.questions.length ?? 0} 个问题</small>
+      </button>
+    </div>
+  );
+
+  return (
+    <section className="page agent-page">
+      <PageHeader title="求职 Agent" description="目标岗位、可审核草稿副本与面试准备" />
+      {message && (
+        <div className="toast-stack" role="status" aria-live="polite">
+          <div className="toast-message">
+            <CheckCircle2 size={16} />
+            <span>{message}</span>
+          </div>
+        </div>
+      )}
+      {error && <div className="error-box compact-alert">{error}</div>}
+
+      {agentTabs}
+
+      <div className={`agent-workspace agent-workspace-${activeAgentTab}`}>
+        {activeAgentTab === "overview" && (
+          <section className="panel agent-control-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>目标岗位</h2>
+                <p>输入岗位标题、来源 ID、marker 或文件名。</p>
+              </div>
+            </div>
+            <div className="agent-input-grid">
+              <input
+                className="agent-query-input"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="例如：1988156943977824258"
+              />
+              <textarea
+                className="agent-note-input"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="草稿备注，可选"
+              />
+              <textarea
+                className="agent-note-input batch-query-input"
+                value={batchQueries}
+                onChange={(event) => setBatchQueries(event.target.value)}
+                placeholder="批量报告队列：每行一个岗位 ID、marker 或文件名，至少 2 个，最多 5 个"
+              />
+            </div>
+            <div className="agent-action-grid">
+              <button className="secondary-button" onClick={handleBuildSummary} disabled={busy || !query.trim()}>
+                {loadingAction === "summary" ? <Loader2 className="spin" size={17} /> : <BriefcaseBusiness size={17} />}
+                定位岗位
+              </button>
+              <button className="secondary-button" onClick={handleBuildDraft} disabled={busy || !query.trim()}>
+                {loadingAction === "draft" ? <Loader2 className="spin" size={17} /> : <FileText size={17} />}
+                生成草稿
+              </button>
+              <button className="primary-button" onClick={handleExportDraft} disabled={busy || !query.trim()}>
+                {loadingAction === "export" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
+                保存副本
+              </button>
+              <button className="primary-button" onClick={handleExportResumeDiff} disabled={busy || !query.trim()}>
+                {loadingAction === "resume-diff-export" ? <Loader2 className="spin" size={17} /> : <FileText size={17} />}
+                保存差异
+              </button>
+              <button className="primary-button" onClick={handleExportReport} disabled={busy || !query.trim()}>
+                {loadingAction === "report-export" ? <Loader2 className="spin" size={17} /> : <FileText size={17} />}
+                保存报告
+              </button>
+              <button
+                className="secondary-button"
+                onClick={handleCreateBatchReportQueue}
+                disabled={busy || parseBatchQueries(batchQueries).length < 2}
+              >
+                {loadingAction === "batch-report-queue" ? <Loader2 className="spin" size={17} /> : <FileText size={17} />}
+                批量报告
+              </button>
+              <button className="secondary-button" onClick={handleRefreshCopies} disabled={busy}>
+                {loadingAction === "list" ||
+                loadingAction === "resume-diff-list" ||
+                loadingAction === "report-list" ||
+                loadingAction === "batch-report-list" ? (
+                  <Loader2 className="spin" size={17} />
+                ) : (
+                  <RefreshCw size={17} />
+                )}
+                刷新副本
+              </button>
+              <button className="secondary-button" onClick={handleBuildInterviewSession} disabled={busy || !query.trim()}>
+                {loadingAction === "interview" ? <Loader2 className="spin" size={17} /> : <MessageSquareText size={17} />}
+                生成面试问题
+              </button>
+            </div>
+            <div className="agent-boundary-box">
+              <ShieldCheck size={17} />
+              <span>草稿只保存到私有副本目录，不覆盖真实简历，不自动投递。</span>
+            </div>
+          </section>
+        )}
+
+        <div className="agent-main-grid">
+          <div className="agent-column agent-context-column">
+            <section className="panel agent-summary-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Agent 状态</h2>
+                  <p>{summary?.matched ? "目标岗位已定位" : "等待定位目标岗位"}</p>
+                </div>
+              </div>
+              {!summary?.matched && <div className="empty-state">尚未生成 Agent 状态。</div>}
+              {summary?.matched && summary.summary && (
+                <div className="agent-status-list">
+                  <div className="agent-target-card">
+                    <strong>{summary.summary.target_confirmation.title}</strong>
+                    <span>{summary.summary.target_confirmation.company || "公司未提供"}</span>
+                    <code title={summary.summary.target_confirmation.source_file}>
+                      {summary.summary.target_confirmation.source_job_id}
+                    </code>
+                  </div>
+                  {summary.summary.pipeline_status.map((item) => (
+                    <div className="agent-status-row" key={item.step}>
+                      <span className={`status-dot ${item.status}`} />
+                      <div>
+                        <strong>{item.label}</strong>
+                        <p>{item.detail}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="panel agent-draft-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>草稿预览</h2>
+                  <p>{draft?.matched ? "候选内容按可写入、需证据、仅面试和不能声称分组" : "先生成草稿"}</p>
+                </div>
+              </div>
+              {!draft?.matched || !draft.draft ? (
+                <div className="empty-state">暂无草稿预览。</div>
+              ) : (
+                <div className="draft-preview-grid">
+                  <DraftList title="可写入简历" items={draft.draft.resume_revision_candidates.can_write_to_resume} />
+                  <DraftList
+                    title="需补证据"
+                    items={draft.draft.resume_revision_candidates.requires_evidence_before_resume.map(
+                      (item) => `${item.candidate_direction}：${item.required_evidence}`
+                    )}
+                  />
+                  <DraftList
+                    title="仅适合面试"
+                    items={draft.draft.resume_revision_candidates.interview_only.map((item) => `${item.topic}：${item.usage}`)}
+                  />
+                  <DraftList
+                    title="不能声称"
+                    items={draft.draft.resume_revision_candidates.cannot_claim.map((item) => `${item.claim}：${item.reason}`)}
+                  />
+                </div>
+              )}
+            </section>
+          </div>
+
+          <section className="panel draft-list-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>审核副本</h2>
+                <p>
+                  {draftFiles.length} 个草稿 · {resumeDiffFiles.length} 个差异 · {resumeWriteReviewFiles.length} 个写回审核 ·{" "}
+                  {reportFiles.length} 个报告 · {batchReportFiles.length} 个批量队列
+                </p>
+              </div>
+            </div>
+          <div className="draft-file-list">
+            <div className="draft-file-section">
+              <div className="copy-section-heading">草稿副本</div>
+              {draftFiles.length === 0 && <div className="empty-state compact">暂无草稿副本。</div>}
+              {draftFiles.map((file) => (
+                <div
+                  className={`draft-file-row ${selectedDraft?.file_name === file.file_name ? "selected" : ""}`}
+                  key={file.file_name}
+                >
+                  <button type="button" onClick={() => handleReadDraft(file.file_name)} title={file.file_name}>
+                    <strong>{file.file_name}</strong>
+                    <span>{formatSize(file.size_bytes)} · {formatDate(file.modified_at)}</span>
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => handleDeleteDraft(file.file_name)}
+                    disabled={busy}
+                    title="删除草稿副本"
+                    aria-label="删除草稿副本"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="draft-file-section">
+              <div className="copy-section-heading">简历差异草稿</div>
+              {resumeDiffFiles.length === 0 && <div className="empty-state compact">暂无简历差异草稿。</div>}
+              {resumeDiffFiles.map((file) => (
+                <div
+                  className={`draft-file-row resume-diff-file-row ${
+                    selectedResumeDiff?.file_name === file.file_name ? "selected" : ""
+                  }`}
+                  key={file.file_name}
+                >
+                  <button type="button" onClick={() => handleReadResumeDiff(file.file_name)} title={file.file_name}>
+                    <strong>{file.file_name}</strong>
+                    <span>{formatSize(file.size_bytes)} · {formatDate(file.modified_at)}</span>
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => handleDeleteResumeDiff(file.file_name)}
+                    disabled={busy}
+                    title="删除简历差异草稿"
+                    aria-label="删除简历差异草稿"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="draft-file-section">
+              <div className="copy-section-heading">求职分析报告</div>
+              {reportFiles.length === 0 && <div className="empty-state compact">暂无报告副本。</div>}
+              {reportFiles.map((file) => (
+                <div
+                  className={`draft-file-row report-file-row ${
+                    selectedReport?.file_name === file.file_name ? "selected" : ""
+                  }`}
+                  key={file.file_name}
+                >
+                  <button type="button" onClick={() => handleReadReport(file.file_name)} title={file.file_name}>
+                    <strong>{file.file_name}</strong>
+                    <span>{formatSize(file.size_bytes)} · {formatDate(file.modified_at)}</span>
+                    <span className={`review-status-pill ${file.review_status}`}>{file.review_label}</span>
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => handleDeleteReport(file.file_name)}
+                    disabled={busy}
+                    title="删除求职分析报告"
+                    aria-label="删除求职分析报告"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="draft-file-section">
+              <div className="copy-section-heading">批量报告队列</div>
+              {batchReportFiles.length === 0 && <div className="empty-state compact">暂无批量报告队列。</div>}
+              {batchReportFiles.map((file) => (
+                <div
+                  className={`draft-file-row batch-report-file-row ${
+                    selectedBatchReport?.file_name === file.file_name ? "selected" : ""
+                  }`}
+                  key={file.file_name}
+                >
+                  <button type="button" onClick={() => handleReadBatchReport(file.file_name)} title={file.file_name}>
+                    <strong>{file.file_name}</strong>
+                    <span>
+                      {file.created_count} 份报告 · {file.failed_count} 个失败 · {formatDate(file.modified_at)}
+                    </span>
+                    <span className={`review-status-pill ${file.review_status}`}>{file.review_label}</span>
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => handleDeleteBatchReport(file.file_name)}
+                    disabled={busy}
+                    title="删除批量报告队列清单"
+                    aria-label="删除批量报告队列清单"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="draft-file-section">
+              <div className="copy-section-heading">写回前审核</div>
+              {resumeWriteReviewFiles.length === 0 && <div className="empty-state compact">暂无写回前审核项。</div>}
+              {resumeWriteReviewFiles.map((file) => (
+                <div
+                  className={`draft-file-row resume-write-review-file-row ${
+                    selectedResumeWriteReview?.file_name === file.file_name ? "selected" : ""
+                  }`}
+                  key={file.file_name}
+                >
+                  <button type="button" onClick={() => handleReadResumeWriteReview(file.file_name)} title={file.file_name}>
+                    <strong>{file.file_name}</strong>
+                    <span>{formatSize(file.size_bytes)} · {formatDate(file.modified_at)}</span>
+                    <span className={`review-status-pill ${file.review_status}`}>{file.review_label}</span>
+                  </button>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => handleDeleteResumeWriteReview(file.file_name)}
+                    disabled={busy}
+                    title="删除写回前审核项"
+                    aria-label="删除写回前审核项"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          </section>
+
+          <div className="agent-column agent-output-column">
+            <section className="panel interview-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>面试模拟</h2>
+                  <p>{interviewSession?.matched ? "选择问题，提交回答并查看反馈" : "先生成面试问题"}</p>
+                </div>
+              </div>
+              {!interviewSession?.matched || !interviewSession.session ? (
+                <div className="empty-state">暂无面试问题。</div>
+              ) : (
+                <div className="interview-workbench">
+                  <div className="interview-question-list">
+                    {interviewSession.session.questions.map((question) => (
+                      <button
+                        className={`interview-question-row ${
+                          selectedQuestionId === question.question_id ? "selected" : ""
+                        }`}
+                        key={question.question_id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedQuestionId(question.question_id);
+                          setInterviewFeedback(null);
+                        }}
+                      >
+                        <strong>问题 {question.question_id}</strong>
+                        <span>{question.question}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <InterviewQuestionDetail question={getSelectedInterviewQuestion(interviewSession, selectedQuestionId)} />
+                  <textarea
+                    className="interview-answer-input"
+                    value={interviewAnswer}
+                    onChange={(event) => setInterviewAnswer(event.target.value)}
+                    placeholder="输入你的面试回答，聚焦真实项目、本人动作、证据和能力边界。"
+                  />
+                  <button
+                    className="primary-button"
+                    onClick={handleSubmitInterviewAnswer}
+                    disabled={busy || !selectedQuestionId || !interviewAnswer.trim()}
+                  >
+                    {loadingAction === "feedback" ? <Loader2 className="spin" size={17} /> : <Send size={17} />}
+                    提交回答
+                  </button>
+                  {interviewFeedback?.feedback && <InterviewFeedbackCard feedback={interviewFeedback} />}
+                </div>
+              )}
+            </section>
+
+            <section className="panel draft-content-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>副本内容</h2>
+              {selectedCopy && <p title={selectedCopy.relative_path}>{selectedCopy.relative_path}</p>}
+            </div>
+            {selectedCopy && (
+              <div className="panel-heading-actions">
+                {selectedResumeDiff && (
+                  <>
+                    <button
+                      className="secondary-button small-button"
+                      onClick={handleCompareResumeDiff}
+                      disabled={busy}
+                    >
+                      {loadingAction === "resume-diff-compare" ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <FileSearch size={16} />
+                      )}
+                      {resumeDiffCompare?.file_name === selectedResumeDiff.file_name ? "还原" : "对比当前简历"}
+                    </button>
+                    <button
+                      className="secondary-button small-button"
+                      onClick={handleCreateResumeWriteReview}
+                      disabled={busy}
+                    >
+                      {loadingAction === "resume-write-queue" ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <ShieldCheck size={16} />
+                      )}
+                      加入审核
+                    </button>
+                  </>
+                )}
+                <button className="secondary-button small-button" onClick={handleDownloadSelectedCopy}>
+                  <Download size={16} />
+                  下载
+                </button>
+              </div>
+            )}
+          </div>
+          {!selectedCopy && <div className="empty-state">从审核副本选择一个草稿或报告副本。</div>}
+          {selectedCopy && (
+            <div className="draft-content-scroll">
+              {selectedBatchReport && (
+                <div className="report-review-box batch-report-review-box">
+                  <div className="report-review-controls">
+                    <label>
+                      批量审核状态
+                      <select
+                        value={batchReportReviewStatus}
+                        onChange={(event) => setBatchReportReviewStatus(event.target.value)}
+                        disabled={busy}
+                      >
+                        {reportReviewOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="secondary-button small-button"
+                      onClick={handleUpdateBatchReportReview}
+                      disabled={busy || !selectedBatchReport}
+                    >
+                      {loadingAction === "batch-report-review" ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <CheckCircle2 size={16} />
+                      )}
+                      更新状态
+                    </button>
+                  </div>
+                  <textarea
+                    className="report-review-note"
+                    value={batchReportReviewNote}
+                    onChange={(event) => setBatchReportReviewNote(event.target.value)}
+                    placeholder="批量审核备注，例如：逐份报告核对证据后再采纳。"
+                    disabled={busy}
+                  />
+                  {selectedBatchReport.review_updated_at && (
+                    <p className="report-review-meta">
+                      当前状态：{selectedBatchReport.review_label} · 更新于{" "}
+                      {formatDate(selectedBatchReport.review_updated_at)}
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedReport && (
+                <div className="report-review-box">
+                  <div className="report-review-controls">
+                    <label>
+                      审核状态
+                      <select
+                        value={reportReviewStatus}
+                        onChange={(event) => setReportReviewStatus(event.target.value)}
+                        disabled={busy}
+                      >
+                        {reportReviewOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="secondary-button small-button"
+                      onClick={handleUpdateReportReview}
+                      disabled={busy || !selectedReport}
+                    >
+                      {loadingAction === "report-review" ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                      更新状态
+                    </button>
+                  </div>
+                  <textarea
+                    className="report-review-note"
+                    value={reportReviewNote}
+                    onChange={(event) => setReportReviewNote(event.target.value)}
+                    placeholder="审核备注，例如：需补充项目证据后再采纳。"
+                    disabled={busy}
+                  />
+                  {selectedReport.review_updated_at && (
+                    <p className="report-review-meta">
+                      当前状态：{selectedReport.review_label} · 更新于 {formatDate(selectedReport.review_updated_at)}
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedResumeWriteReview && (
+                <div className="report-review-box resume-write-review-box">
+                  <div className="report-review-controls">
+                    <label>
+                      审核状态
+                      <select
+                        value={resumeWriteReviewStatus}
+                        onChange={(event) => setResumeWriteReviewStatus(event.target.value)}
+                        disabled={busy}
+                      >
+                        {resumeWriteReviewOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="secondary-button small-button"
+                      onClick={handleUpdateResumeWriteReview}
+                      disabled={busy || !selectedResumeWriteReview}
+                    >
+                      {loadingAction === "resume-write-review" ? (
+                        <Loader2 className="spin" size={16} />
+                      ) : (
+                        <CheckCircle2 size={16} />
+                      )}
+                      更新状态
+                    </button>
+                  </div>
+                  <textarea
+                    className="report-review-note"
+                    value={resumeWriteReviewNote}
+                    onChange={(event) => setResumeWriteReviewNote(event.target.value)}
+                    placeholder="审核备注，例如：证据充足时可人工复制候选表达。"
+                    disabled={busy}
+                  />
+                  {selectedResumeWriteReview.review_updated_at && (
+                    <p className="report-review-meta">
+                      当前状态：{selectedResumeWriteReview.review_label} · 更新于{" "}
+                      {formatDate(selectedResumeWriteReview.review_updated_at)}
+                    </p>
+                  )}
+                </div>
+              )}
+              {selectedResumeDiff && resumeDiffCompare && (
+                <div className="resume-diff-compare-panel">
+                  <div className="compare-status-row">
+                    <span>只读对比</span>
+                    <span>不会覆盖真实简历</span>
+                  </div>
+                  <div className="resume-diff-compare-grid">
+                    <section className="compare-column">
+                      <h3>当前简历</h3>
+                      <p title={resumeDiffCompare.current_resume?.name ?? ""}>
+                        {resumeDiffCompare.current_resume?.name ?? "未设置当前简历"}
+                      </p>
+                      <article className="markdown-preview compare-markdown">
+                        {resumeDiffCompare.current_resume_readable ? (
+                          <ReactMarkdown>{resumeDiffCompare.current_resume_content}</ReactMarkdown>
+                        ) : (
+                          <div className="empty-state compact">当前简历无法以内联 Markdown 方式展示。</div>
+                        )}
+                      </article>
+                    </section>
+                    <section className="compare-column">
+                      <h3>差异草稿</h3>
+                      <p title={resumeDiffCompare.relative_path}>{resumeDiffCompare.relative_path}</p>
+                      <article className="markdown-preview compare-markdown">
+                        <ReactMarkdown>{resumeDiffCompare.resume_diff_content}</ReactMarkdown>
+                      </article>
+                    </section>
+                  </div>
+                  {resumeDiffCompare.warnings.length > 0 && (
+                    <ul className="compare-warning-list">
+                      {resumeDiffCompare.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <article className="markdown-preview draft-markdown-preview">
+                <ReactMarkdown>{selectedCopy.content}</ReactMarkdown>
+              </article>
+            </div>
+          )}
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function getSelectedInterviewQuestion(
+  session: JobInterviewSessionResponse,
+  questionId: number | null
+): InterviewQuestion | null {
+  if (!questionId || !session.session) return null;
+  return session.session.questions.find((question) => question.question_id === questionId) ?? null;
+}
+
+function InterviewQuestionDetail({ question }: { question: InterviewQuestion | null }) {
+  if (!question) return <div className="empty-state compact">请选择一个问题。</div>;
+  return (
+    <div className="interview-question-detail">
+      <p>{question.intent}</p>
+      <ul>
+        {question.answer_checkpoints.map((checkpoint) => (
+          <li key={checkpoint}>{checkpoint}</li>
+        ))}
+      </ul>
+      <div className="warning-box compact-alert">{question.risk_reminder}</div>
+    </div>
+  );
+}
+
+function InterviewFeedbackCard({ feedback }: { feedback: JobInterviewFeedbackResponse }) {
+  if (!feedback.feedback) return null;
+  return (
+    <div className="interview-feedback-card">
+      <h3>回答反馈</h3>
+      <div className="interview-feedback-metrics">
+        <span>清晰度：{feedback.feedback.clarity}</span>
+        <span>证据：{feedback.feedback.evidence_strength}</span>
+        <span>边界：{feedback.feedback.boundary_risk}</span>
+      </div>
+      <p>{feedback.feedback.summary}</p>
+      <DraftList title="亮点" items={feedback.feedback.strengths} />
+      <DraftList title="改进建议" items={feedback.feedback.improvements} />
+      <DraftList title="风险提醒" items={feedback.feedback.risk_flags} />
+      <DraftList title="下一版回答结构" items={feedback.feedback.suggested_next_answer_shape} />
+    </div>
+  );
+}
+
+function DraftList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="draft-list-block">
+      <h3>{title}</h3>
+      {items.length === 0 ? (
+        <p className="muted-text">暂无内容。</p>
+      ) : (
+        <ul>
+          {items.slice(0, 5).map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -436,7 +1931,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
         setCurrentResumeState(await getCurrentResume());
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "读取文档列表失败。");
+      setError(formatRequestError(requestError, "读取文档列表失败。"));
     } finally {
       setLoading(false);
     }
@@ -450,7 +1945,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
       setCurrentResumeState(nextCurrentResume);
       setMessage("已设为当前简历。简历分析会优先使用这份资料。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "设置当前简历失败。");
+      setError(formatRequestError(requestError, "设置当前简历失败。"));
     }
   }
 
@@ -464,7 +1959,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
       await refreshDocuments();
       setMessage("上传成功。请到索引状态页更新向量索引。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "上传失败。");
+      setError(formatRequestError(requestError, "上传失败。"));
     } finally {
       event.target.value = "";
     }
@@ -484,7 +1979,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
       await refreshDocuments();
       setMessage("已删除。请到索引状态页更新向量索引。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "删除失败。");
+      setError(formatRequestError(requestError, "删除失败。"));
     }
   }
 
@@ -499,7 +1994,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
     try {
       setContent(await readDocument(category, documentInfo));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "读取文档失败。");
+      setError(formatRequestError(requestError, "读取文档失败。"));
     }
   }
 
@@ -512,7 +2007,7 @@ function DocumentPage({ category, embedded = false }: { category: CategoryKey; e
       await refreshDocuments();
       setMessage("已保存。请到索引状态页更新向量索引。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "保存失败。");
+      setError(formatRequestError(requestError, "保存失败。"));
     }
   }
 
@@ -734,7 +2229,7 @@ function IndexPage({
       setResult(nextResult);
       sessionStorage.setItem("local-rag-index-result", JSON.stringify(nextResult));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "索引更新失败。");
+      setError(formatRequestError(requestError, "索引更新失败。"));
     } finally {
       setLoading(false);
     }
@@ -827,6 +2322,17 @@ function cleanAnswer(answer: string) {
     .trim();
 }
 
+function parseBatchQueries(value: string) {
+  const results: string[] = [];
+  for (const item of value.split(/[\n,，\t]+/u)) {
+    const trimmed = item.trim();
+    if (trimmed && !results.includes(trimmed)) {
+      results.push(trimmed);
+    }
+  }
+  return results;
+}
+
 function canPreviewMarkdown(documentInfo: DocumentInfo) {
   return documentInfo.name.toLowerCase().endsWith(".md");
 }
@@ -839,6 +2345,70 @@ function loadIndexResult() {
   } catch {
     return null;
   }
+}
+
+const ASK_MESSAGES_STORAGE_KEY = "local-rag-ask-messages-v1";
+const ASK_SELECTED_ARTIFACT_STORAGE_KEY = "local-rag-ask-selected-artifact-v1";
+
+function loadAskMessages(): ConversationMessage[] {
+  const raw = localStorage.getItem(ASK_MESSAGES_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isConversationMessage);
+  } catch {
+    return [];
+  }
+}
+
+function saveAskMessages(messages: ConversationMessage[]) {
+  localStorage.setItem(ASK_MESSAGES_STORAGE_KEY, JSON.stringify(messages));
+}
+
+function loadAskSelectedArtifact(): ChatArtifact | null {
+  const raw = localStorage.getItem(ASK_SELECTED_ARTIFACT_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return isChatArtifact(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAskSelectedArtifact(artifact: ChatArtifact | null) {
+  if (!artifact) {
+    localStorage.removeItem(ASK_SELECTED_ARTIFACT_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(ASK_SELECTED_ARTIFACT_STORAGE_KEY, JSON.stringify(artifact));
+}
+
+function clearAskConversationStorage() {
+  localStorage.removeItem(ASK_MESSAGES_STORAGE_KEY);
+  localStorage.removeItem(ASK_SELECTED_ARTIFACT_STORAGE_KEY);
+}
+
+function isConversationMessage(value: unknown): value is ConversationMessage {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ConversationMessage>;
+  return (
+    typeof item.id === "string" &&
+    (item.role === "user" || item.role === "assistant") &&
+    typeof item.content === "string"
+  );
+}
+
+function isChatArtifact(value: unknown): value is ChatArtifact {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<ChatArtifact>;
+  return (
+    typeof item.artifact_id === "string" &&
+    typeof item.type === "string" &&
+    typeof item.title === "string" &&
+    typeof item.description === "string"
+  );
 }
 
 export default App;

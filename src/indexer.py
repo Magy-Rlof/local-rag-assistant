@@ -3,6 +3,7 @@ import os
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from qdrant_client import QdrantClient, models
@@ -22,6 +23,7 @@ from main import (
 
 
 LogFn = Callable[[str], None]
+EmbeddingFn = Callable[[str, str], list[float]]
 INCLUDE_PUBLIC_SAMPLES_ENV = "LOCAL_RAG_INCLUDE_PUBLIC_SAMPLES"
 
 
@@ -118,26 +120,50 @@ def should_include_public_samples() -> bool:
     return os.getenv(INCLUDE_PUBLIC_SAMPLES_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def build_index(api_key: str | None = None, log: LogFn | None = None) -> IndexBuildResult:
-    if api_key is None:
+def resolve_path(value: Path | str | None, default: Path) -> Path:
+    if value is None:
+        return default
+    return Path(value)
+
+
+def build_index(
+    api_key: str | None = None,
+    log: LogFn | None = None,
+    *,
+    embedding_fn: EmbeddingFn | None = None,
+    data_dir: Path | str | None = None,
+    private_data_dir: Path | str | None = None,
+    qdrant_path: Path | str | None = None,
+    include_public_samples: bool | None = None,
+    allow_empty_documents: bool = False,
+) -> IndexBuildResult:
+    if api_key is None and embedding_fn is None:
         api_key = get_api_key()
 
-    include_public_samples = should_include_public_samples()
-    documents = load_knowledge_documents(
-        DATA_DIR,
-        PRIVATE_DATA_DIR,
-        include_public_samples=include_public_samples,
-    )
+    resolved_data_dir = resolve_path(data_dir, DATA_DIR)
+    resolved_private_data_dir = resolve_path(private_data_dir, PRIVATE_DATA_DIR)
+    resolved_qdrant_path = resolve_path(qdrant_path, QDRANT_PATH)
+    resolved_include_public_samples = should_include_public_samples() if include_public_samples is None else include_public_samples
+    try:
+        documents = load_knowledge_documents(
+            resolved_data_dir,
+            resolved_private_data_dir,
+            include_public_samples=resolved_include_public_samples,
+        )
+    except RuntimeError as exc:
+        if not allow_empty_documents or "没有找到可加载的知识库文档" not in str(exc):
+            raise
+        documents = []
     if log:
-        if include_public_samples:
+        if resolved_include_public_samples:
             log(f"已启用公开示例资料索引：{INCLUDE_PUBLIC_SAMPLES_ENV}=true")
         else:
             log(f"默认排除公开示例资料：如需演示，请设置 {INCLUDE_PUBLIC_SAMPLES_ENV}=true 后重建索引")
-    sections = split_documents(documents)
-    if not sections:
+    sections = split_documents(documents) if documents else []
+    if documents and not sections:
         raise RuntimeError("没有可写入索引的文档片段。")
 
-    client = QdrantClient(path=str(QDRANT_PATH))
+    client = QdrantClient(path=str(resolved_qdrant_path))
     try:
         ensure_collection(client)
 
@@ -166,7 +192,10 @@ def build_index(api_key: str | None = None, log: LogFn | None = None) -> IndexBu
             for section_index, section in enumerate(sections_by_source.get(source_file, []), start=1):
                 text = build_section_text(section)
                 try:
-                    vector = create_embedding(api_key, text)
+                    if embedding_fn is None:
+                        vector = create_embedding(api_key, text)
+                    else:
+                        vector = embedding_fn(api_key or "", text)
                 except Exception:
                     if log:
                         log(f"生成向量失败：{section['source_file']} / {section['title']}")
@@ -196,7 +225,7 @@ def build_index(api_key: str | None = None, log: LogFn | None = None) -> IndexBu
             removed_sources=removed_sources,
             written_points=written_points,
             collection_name=COLLECTION_NAME,
-            storage_path=str(QDRANT_PATH),
+            storage_path=str(resolved_qdrant_path),
         )
     finally:
         client.close()

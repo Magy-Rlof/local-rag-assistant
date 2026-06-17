@@ -24,6 +24,45 @@ from .document_service import (  # noqa: E402
     set_current_resume,
     write_markdown_document,
 )
+from .job_resolver import resolve_job  # noqa: E402
+from .job_matcher import build_job_match_context  # noqa: E402
+from .job_match_draft import build_job_match_draft  # noqa: E402
+from .job_match_draft_export import (  # noqa: E402
+    delete_job_match_draft_export,
+    export_job_match_draft,
+    list_job_match_draft_exports,
+    read_job_match_draft_export,
+)
+from .job_match_report_export import (  # noqa: E402
+    delete_job_match_report_export,
+    export_job_match_report,
+    list_job_match_report_exports,
+    read_job_match_report_export,
+    update_job_match_report_review,
+)
+from .job_batch_report_queue import (  # noqa: E402
+    create_job_match_report_batch_queue,
+    delete_job_match_report_batch_queue,
+    list_job_match_report_batch_queues,
+    read_job_match_report_batch_queue,
+    update_job_match_report_batch_review,
+)
+from .resume_revision_draft_export import (  # noqa: E402
+    delete_resume_revision_draft_export,
+    export_resume_revision_draft,
+    list_resume_revision_draft_exports,
+    read_resume_revision_draft_export,
+)
+from .resume_revision_compare import compare_resume_revision_with_current  # noqa: E402
+from .resume_write_review_queue import (  # noqa: E402
+    create_resume_write_review_item,
+    delete_resume_write_review_item,
+    list_resume_write_review_items,
+    read_resume_write_review_item,
+    update_resume_write_review_item,
+)
+from .job_interview import build_interview_feedback, build_interview_session  # noqa: E402
+from .job_agent_summary import build_job_agent_summary  # noqa: E402
 from .rag_service import ask_with_rag, stream_event, stream_with_rag  # noqa: E402
 from .schemas import (  # noqa: E402
     AskRequest,
@@ -31,6 +70,45 @@ from .schemas import (  # noqa: E402
     DocumentContent,
     DocumentInfo,
     IndexResponse,
+    InterviewFeedbackRequest,
+    JobAgentSummaryResponse,
+    JobMatchDraftExportContentResponse,
+    JobMatchDraftExportDeleteResponse,
+    JobMatchDraftExportListResponse,
+    JobMatchDraftExportRequest,
+    JobMatchDraftExportResponse,
+    JobMatchReportExportContentResponse,
+    JobMatchReportExportDeleteResponse,
+    JobMatchReportExportListResponse,
+    JobMatchReportExportRequest,
+    JobMatchReportExportResponse,
+    JobMatchReportBatchDeleteResponse,
+    JobMatchReportBatchQueueContentResponse,
+    JobMatchReportBatchQueueListResponse,
+    JobMatchReportBatchQueueRequest,
+    JobMatchReportBatchQueueResponse,
+    JobMatchReportBatchReviewUpdateRequest,
+    JobMatchReportBatchReviewUpdateResponse,
+    JobMatchReportReviewUpdateRequest,
+    JobMatchReportReviewUpdateResponse,
+    JobInterviewFeedbackResponse,
+    JobInterviewSessionResponse,
+    JobMatchContextResponse,
+    JobMatchDraftResponse,
+    JobResolveResponse,
+    ResumeRevisionCompareResponse,
+    ResumeRevisionDraftExportContentResponse,
+    ResumeRevisionDraftExportDeleteResponse,
+    ResumeRevisionDraftExportListResponse,
+    ResumeRevisionDraftExportRequest,
+    ResumeRevisionDraftExportResponse,
+    ResumeWriteReviewDeleteResponse,
+    ResumeWriteReviewQueueContentResponse,
+    ResumeWriteReviewQueueListResponse,
+    ResumeWriteReviewQueueRequest,
+    ResumeWriteReviewQueueResponse,
+    ResumeWriteReviewUpdateRequest,
+    ResumeWriteReviewUpdateResponse,
     SetCurrentResumeRequest,
     UpdateDocumentRequest,
 )
@@ -121,6 +199,285 @@ def set_active_resume(request: SetCurrentResumeRequest) -> dict:
         return set_current_resume(request.name, source=request.source)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="简历不存在。") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/resolve", response_model=JobResolveResponse)
+def resolve_job_endpoint(query: str) -> dict:
+    try:
+        return resolve_job(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/context", response_model=JobMatchContextResponse)
+def build_job_match_context_endpoint(query: str) -> dict:
+    try:
+        return build_job_match_context(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/draft", response_model=JobMatchDraftResponse)
+def build_job_match_draft_endpoint(query: str) -> dict:
+    try:
+        return build_job_match_draft(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/match/draft/export", response_model=JobMatchDraftExportResponse)
+def export_job_match_draft_endpoint(request: JobMatchDraftExportRequest) -> dict:
+    try:
+        return export_job_match_draft(request.query, request.confirm_save, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/draft/exports", response_model=JobMatchDraftExportListResponse)
+def list_job_match_draft_exports_endpoint() -> dict:
+    try:
+        return list_job_match_draft_exports()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/draft/exports/{file_name}", response_model=JobMatchDraftExportContentResponse)
+def read_job_match_draft_export_endpoint(file_name: str) -> dict:
+    try:
+        return read_job_match_draft_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Draft export does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/jobs/match/draft/exports/{file_name}", response_model=JobMatchDraftExportDeleteResponse)
+def delete_job_match_draft_export_endpoint(file_name: str) -> dict:
+    try:
+        return delete_job_match_draft_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Draft export does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/match/resume-diff/export", response_model=ResumeRevisionDraftExportResponse)
+def export_resume_revision_draft_endpoint(request: ResumeRevisionDraftExportRequest) -> dict:
+    try:
+        return export_resume_revision_draft(request.query, request.confirm_save, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/resume-diff/exports", response_model=ResumeRevisionDraftExportListResponse)
+def list_resume_revision_draft_exports_endpoint() -> dict:
+    try:
+        return list_resume_revision_draft_exports()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/resume-diff/exports/{file_name}", response_model=ResumeRevisionDraftExportContentResponse)
+def read_resume_revision_draft_export_endpoint(file_name: str) -> dict:
+    try:
+        return read_resume_revision_draft_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume revision draft does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/jobs/match/resume-diff/exports/{file_name}/compare-current",
+    response_model=ResumeRevisionCompareResponse,
+)
+def compare_resume_revision_with_current_endpoint(file_name: str) -> dict:
+    try:
+        return compare_resume_revision_with_current(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume revision draft does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/jobs/match/resume-diff/exports/{file_name}", response_model=ResumeRevisionDraftExportDeleteResponse)
+def delete_resume_revision_draft_export_endpoint(file_name: str) -> dict:
+    try:
+        return delete_resume_revision_draft_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume revision draft does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/match/resume-write-review/queue", response_model=ResumeWriteReviewQueueResponse)
+def create_resume_write_review_item_endpoint(request: ResumeWriteReviewQueueRequest) -> dict:
+    try:
+        return create_resume_write_review_item(request.diff_file_name, request.confirm_queue, request.note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume revision draft does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/resume-write-review/queue", response_model=ResumeWriteReviewQueueListResponse)
+def list_resume_write_review_items_endpoint() -> dict:
+    try:
+        return list_resume_write_review_items()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/resume-write-review/queue/{file_name}", response_model=ResumeWriteReviewQueueContentResponse)
+def read_resume_write_review_item_endpoint(file_name: str) -> dict:
+    try:
+        return read_resume_write_review_item(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume write review item does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/jobs/match/resume-write-review/queue/{file_name}/review", response_model=ResumeWriteReviewUpdateResponse)
+def update_resume_write_review_item_endpoint(file_name: str, request: ResumeWriteReviewUpdateRequest) -> dict:
+    try:
+        return update_resume_write_review_item(file_name, request.review_status, request.review_note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume write review item does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/jobs/match/resume-write-review/queue/{file_name}", response_model=ResumeWriteReviewDeleteResponse)
+def delete_resume_write_review_item_endpoint(file_name: str) -> dict:
+    try:
+        return delete_resume_write_review_item(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Resume write review item does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/match/report/export", response_model=JobMatchReportExportResponse)
+def export_job_match_report_endpoint(request: JobMatchReportExportRequest) -> dict:
+    try:
+        return export_job_match_report(request.query, request.confirm_save, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/report/exports", response_model=JobMatchReportExportListResponse)
+def list_job_match_report_exports_endpoint() -> dict:
+    try:
+        return list_job_match_report_exports()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/report/exports/{file_name}", response_model=JobMatchReportExportContentResponse)
+def read_job_match_report_export_endpoint(file_name: str) -> dict:
+    try:
+        return read_job_match_report_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Report export does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/jobs/match/report/exports/{file_name}", response_model=JobMatchReportExportDeleteResponse)
+def delete_job_match_report_export_endpoint(file_name: str) -> dict:
+    try:
+        return delete_job_match_report_export(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Report export does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/jobs/match/report/exports/{file_name}/review", response_model=JobMatchReportReviewUpdateResponse)
+def update_job_match_report_review_endpoint(file_name: str, request: JobMatchReportReviewUpdateRequest) -> dict:
+    try:
+        return update_job_match_report_review(file_name, request.review_status, request.review_note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Report export does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/match/report/batch-queue", response_model=JobMatchReportBatchQueueResponse)
+def create_job_match_report_batch_queue_endpoint(request: JobMatchReportBatchQueueRequest) -> dict:
+    try:
+        return create_job_match_report_batch_queue(request.queries, request.confirm_queue, request.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/report/batch-queue", response_model=JobMatchReportBatchQueueListResponse)
+def list_job_match_report_batch_queues_endpoint() -> dict:
+    try:
+        return list_job_match_report_batch_queues()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/match/report/batch-queue/{file_name}", response_model=JobMatchReportBatchQueueContentResponse)
+def read_job_match_report_batch_queue_endpoint(file_name: str) -> dict:
+    try:
+        return read_job_match_report_batch_queue(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Batch report queue does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put(
+    "/api/jobs/match/report/batch-queue/{file_name}/review",
+    response_model=JobMatchReportBatchReviewUpdateResponse,
+)
+def update_job_match_report_batch_review_endpoint(
+    file_name: str,
+    request: JobMatchReportBatchReviewUpdateRequest,
+) -> dict:
+    try:
+        return update_job_match_report_batch_review(file_name, request.review_status, request.review_note)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Batch report queue does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/jobs/match/report/batch-queue/{file_name}", response_model=JobMatchReportBatchDeleteResponse)
+def delete_job_match_report_batch_queue_endpoint(file_name: str) -> dict:
+    try:
+        return delete_job_match_report_batch_queue(file_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Batch report queue does not exist.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/interview/session", response_model=JobInterviewSessionResponse)
+def build_interview_session_endpoint(query: str) -> dict:
+    try:
+        return build_interview_session(query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/interview/feedback", response_model=JobInterviewFeedbackResponse)
+def build_interview_feedback_endpoint(request: InterviewFeedbackRequest) -> dict:
+    try:
+        return build_interview_feedback(request.query, request.question_id, request.answer)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/agent/summary", response_model=JobAgentSummaryResponse)
+def build_job_agent_summary_endpoint(query: str) -> dict:
+    try:
+        return build_job_agent_summary(query)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

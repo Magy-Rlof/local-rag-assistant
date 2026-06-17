@@ -34,6 +34,7 @@ from main import (  # noqa: E402
 )
 
 from .document_service import CATEGORIES, get_current_resume_source_candidates, list_documents  # noqa: E402
+from .job_chat_tools import append_job_tool_note, build_job_chat_tool_result  # noqa: E402
 from .prompt_templates import build_prompt_for_task  # noqa: E402
 from .task_router import (  # noqa: E402
     TaskType,
@@ -72,19 +73,20 @@ DANGLING_ANSWER_ENDINGS = ("，", "、", "：", ":", "；", ";", "→", "->")
 
 
 def stream_with_rag(question: str, history: list[dict] | None = None):
-    api_key = get_api_key()
     prepared = prepare_generation(question, history or [])
+    artifacts = prepared.get("job_tool_result", {}).get("artifacts", [])
     yield stream_event(
         "meta",
         {
             "sources": prepared["sources"],
             "retrieval_seconds": prepared["retrieval_seconds"],
             "mode": prepared["mode"],
+            "artifacts": [],
         },
     )
 
     if prepared.get("direct_answer"):
-        answer = prepared["direct_answer"]
+        answer = append_job_tool_note(prepared["direct_answer"], prepared.get("job_tool_result"))
         yield stream_event("delta", {"text": answer})
         log_answer_to_console(
             phase="stream-direct",
@@ -104,10 +106,12 @@ def stream_with_rag(question: str, history: list[dict] | None = None):
                 "retrieval_seconds": prepared["retrieval_seconds"],
                 "generation_seconds": 0.0,
                 "mode": prepared["mode"],
+                "artifacts": artifacts,
             },
         )
         return
 
+    api_key = get_api_key()
     generation_start = time.perf_counter()
     answer_parts: list[str] = []
     finish_reason = None
@@ -133,6 +137,11 @@ def stream_with_rag(question: str, history: list[dict] | None = None):
 
     generation_seconds = time.perf_counter() - generation_start
     truncated = finish_reason == "length" or needs_continuation(answer, prepared)
+    answer_with_tool_note = append_job_tool_note(answer, prepared.get("job_tool_result"))
+    if answer_with_tool_note != answer:
+        suffix = answer_with_tool_note[len(answer):]
+        yield stream_event("delta", {"text": suffix})
+        answer = answer_with_tool_note
     log_answer_to_console(
         phase="stream",
         question=question,
@@ -151,6 +160,7 @@ def stream_with_rag(question: str, history: list[dict] | None = None):
             "retrieval_seconds": prepared["retrieval_seconds"],
             "generation_seconds": generation_seconds,
             "mode": prepared["mode"],
+            "artifacts": artifacts,
         },
     )
 
@@ -292,9 +302,22 @@ def stream_model_messages(api_key: str, messages: list[dict], temperature: float
 
 def prepare_generation(question: str, history: list[dict] | None = None) -> dict:
     safe_history = normalize_history(history or [])
+    job_tool_result = build_job_chat_tool_result(question, safe_history)
     task_type = detect_task_type(question, safe_history)
     conversation_state = build_conversation_state(question, safe_history)
     context_plan = build_context_plan(task_type, conversation_state)
+
+    if job_tool_result.get("answer_note"):
+        return {
+            "messages": [],
+            "direct_answer": job_tool_result["answer_note"],
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "mode": "system",
+            "task_type": task_type,
+            "question": question,
+            "job_tool_result": {"artifacts": job_tool_result["artifacts"], "answer_note": ""},
+        }
 
     system_answer = answer_system_question(question)
     if system_answer:
@@ -306,6 +329,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "mode": "system",
             "task_type": task_type,
             "question": question,
+            "job_tool_result": job_tool_result,
         }
 
     overview_answer = answer_library_overview_question(question, safe_history)
@@ -318,6 +342,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "mode": "system",
             "task_type": task_type,
             "question": question,
+            "job_tool_result": job_tool_result,
         }
 
     if not should_use_rag(question, safe_history, task_type):
@@ -328,6 +353,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "mode": "chat",
             "task_type": task_type,
             "question": question,
+            "job_tool_result": job_tool_result,
         }
 
     start_time = time.perf_counter()
@@ -356,6 +382,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
         "mode": "rag",
         "task_type": task_type,
         "question": question,
+        "job_tool_result": job_tool_result,
     }
 
 
@@ -433,36 +460,50 @@ def format_sources(sections: list[dict]) -> list[dict]:
 
 
 def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
-    api_key = get_api_key()
     safe_history = normalize_history(history or [])
+    job_tool_result = build_job_chat_tool_result(question, safe_history)
     task_type = detect_task_type(question, safe_history)
     conversation_state = build_conversation_state(question, safe_history)
     context_plan = build_context_plan(task_type, conversation_state)
 
-    system_answer = answer_system_question(question)
-    if system_answer:
+    if job_tool_result.get("answer_note"):
         return {
-            "answer": system_answer,
+            "answer": job_tool_result["answer_note"],
             "truncated": False,
             "sources": [],
             "retrieval_seconds": 0.0,
             "generation_seconds": 0.0,
             "mode": "system",
+            "artifacts": job_tool_result["artifacts"],
+        }
+
+    system_answer = answer_system_question(question)
+    if system_answer:
+        return {
+            "answer": append_job_tool_note(system_answer, job_tool_result),
+            "truncated": False,
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": 0.0,
+            "mode": "system",
+            "artifacts": job_tool_result["artifacts"],
         }
 
     overview_answer = answer_library_overview_question(question, safe_history)
     if overview_answer:
         return {
-            "answer": overview_answer,
+            "answer": append_job_tool_note(overview_answer, job_tool_result),
             "truncated": False,
             "sources": [],
             "retrieval_seconds": 0.0,
             "generation_seconds": 0.0,
             "mode": "system",
+            "artifacts": job_tool_result["artifacts"],
         }
 
+    api_key = get_api_key()
     if not should_use_rag(question, safe_history, task_type):
-        return ask_with_chat(api_key, question, safe_history)
+        return ask_with_chat(api_key, question, safe_history, job_tool_result)
 
     start_time = time.perf_counter()
     intent_text = build_intent_text(question, safe_history)
@@ -520,6 +561,7 @@ def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
         "question": question,
     }
     answer, continuation_truncated = complete_answer_once(api_key, messages, answer, prepared)
+    answer = append_job_tool_note(answer, job_tool_result)
     generation_seconds = time.perf_counter() - generation_start
     truncated = continuation_truncated or needs_continuation(answer, prepared)
     log_answer_to_console(
@@ -546,6 +588,7 @@ def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
         "retrieval_seconds": retrieval_seconds,
         "generation_seconds": generation_seconds,
         "mode": "rag",
+        "artifacts": job_tool_result["artifacts"],
     }
 
 
@@ -561,7 +604,7 @@ def get_forced_context_sections(context_plan) -> list[dict]:
     return forced_sections
 
 
-def ask_with_chat(api_key: str, question: str, history: list[dict]) -> dict:
+def ask_with_chat(api_key: str, question: str, history: list[dict], job_tool_result: dict | None = None) -> dict:
     messages = build_chat_messages(question, history)
     generation_start = time.perf_counter()
     model_result = ask_model_messages_result(api_key, messages)
@@ -572,6 +615,7 @@ def ask_with_chat(api_key: str, question: str, history: list[dict]) -> dict:
         "question": question,
     }
     answer, continuation_truncated = complete_answer_once(api_key, messages, answer, prepared)
+    answer = append_job_tool_note(answer, job_tool_result)
     generation_seconds = time.perf_counter() - generation_start
     truncated = continuation_truncated or needs_continuation(answer, prepared)
     log_answer_to_console(
@@ -590,6 +634,7 @@ def ask_with_chat(api_key: str, question: str, history: list[dict]) -> dict:
         "retrieval_seconds": 0.0,
         "generation_seconds": generation_seconds,
         "mode": "chat",
+        "artifacts": (job_tool_result or {}).get("artifacts", []),
     }
 
 
