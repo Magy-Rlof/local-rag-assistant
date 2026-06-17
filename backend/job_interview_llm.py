@@ -2,7 +2,9 @@ import json
 import re
 import sys
 import time
+from copy import deepcopy
 from difflib import SequenceMatcher
+from hashlib import sha256
 from pathlib import Path
 
 import requests
@@ -24,6 +26,9 @@ from main import (  # noqa: E402
     should_send_resume_to_llm_interview,
 )
 
+from .job_profile import build_job_skill_analysis  # noqa: E402
+from .job_question_engine import build_rule_interview_question_set  # noqa: E402
+
 
 DEFAULT_QUESTION_COUNT = 8
 DEFAULT_CHOICE_COUNT = 5
@@ -41,14 +46,20 @@ FORBIDDEN_PHRASES = [
 ]
 ANSWER_KEYS = ["A", "B", "C", "D"]
 TRUE_FALSE_KEYS = ["正确", "错误"]
+INTERVIEW_CACHE_SCHEMA_VERSION = "job_interview_v1_rule_skillreq_cache_v1"
+INTERVIEW_QUESTION_CACHE: dict[str, dict] = {}
 
 
 def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict:
     draft = draft_response["draft"]
     warnings: list[str] = []
+    cache_key = build_interview_cache_key(draft_response)
+    cached = read_interview_question_cache(cache_key)
+    if cached:
+        return cached
 
     if not is_llm_interview_enabled():
-        return build_fallback_result(
+        result = build_fallback_result(
             draft=draft,
             model="",
             started_at=None,
@@ -57,6 +68,8 @@ def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict
             warnings=["LLM 面试题生成未启用，已使用本地规则回退。"],
             llm_attempted=False,
         )
+        write_interview_question_cache(cache_key, result)
+        return result
 
     started_at = time.perf_counter()
     model = get_llm_interview_model()
@@ -74,7 +87,7 @@ def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict
             validation = validate_interview_payload(repaired["content"], context)
             validation_errors = validation["errors"]
         if validation["valid"]:
-            return {
+            result = {
                 "questions": validation["questions"],
                 "generation_mode": "llm",
                 "generation_model": model,
@@ -85,7 +98,10 @@ def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict
                 "fallback_reason": "",
                 "fallback_detail": "",
                 "validation_errors": [],
+                "cache_hit": False,
             }
+            write_interview_question_cache(cache_key, result)
+            return result
         if any("不是 JSON" in error or "JSON" in error and "不是" in error for error in validation_errors):
             fallback_reason = "json_parse_failed"
         else:
@@ -101,7 +117,7 @@ def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict
         fallback_detail = f"LLM 面试题生成失败，已使用本地规则回退：{summarize_exception(exc)}"
         warnings.append(fallback_detail)
 
-    return build_fallback_result(
+    result = build_fallback_result(
         draft=draft,
         model=model,
         started_at=started_at,
@@ -112,6 +128,8 @@ def generate_interview_questions_with_llm_fallback(draft_response: dict) -> dict
         repair_attempted=repair_attempted,
         validation_errors=validation_errors,
     )
+    write_interview_question_cache(cache_key, result)
+    return result
 
 
 def build_fallback_result(
@@ -136,7 +154,48 @@ def build_fallback_result(
         "fallback_reason": fallback_reason,
         "fallback_detail": fallback_detail,
         "validation_errors": validation_errors or [],
+        "cache_hit": False,
     }
+
+
+def build_interview_cache_key(draft_response: dict) -> str:
+    draft = draft_response["draft"]
+    confirmation = draft.get("target_confirmation", {})
+    cache_payload = {
+        "schema_version": INTERVIEW_CACHE_SCHEMA_VERSION,
+        "job_id": confirmation.get("source_job_id", ""),
+        "marker": confirmation.get("marker", ""),
+        "source_file": confirmation.get("source_file", ""),
+        "source_url": confirmation.get("source_url", ""),
+        "requirements": draft.get("job_core_requirements", []),
+        "responsibilities": draft.get("job_core_responsibilities", []),
+        "llm_enabled": is_llm_interview_enabled(),
+        "llm_model": get_llm_interview_model() if is_llm_interview_enabled() else "",
+        "repair_enabled": is_llm_interview_repair_enabled(),
+        "send_resume": should_send_resume_to_llm_interview(),
+    }
+    raw = json.dumps(cache_payload, ensure_ascii=False, sort_keys=True)
+    return sha256(raw.encode("utf-8")).hexdigest()
+
+
+def read_interview_question_cache(cache_key: str) -> dict | None:
+    cached = INTERVIEW_QUESTION_CACHE.get(cache_key)
+    if not cached:
+        return None
+    result = deepcopy(cached)
+    result["cache_hit"] = True
+    result["generation_seconds"] = 0.0
+    return result
+
+
+def write_interview_question_cache(cache_key: str, result: dict) -> None:
+    cached = deepcopy(result)
+    cached["cache_hit"] = False
+    INTERVIEW_QUESTION_CACHE[cache_key] = cached
+
+
+def clear_interview_question_cache() -> None:
+    INTERVIEW_QUESTION_CACHE.clear()
 
 
 def build_interview_context(draft_response: dict) -> dict:
@@ -486,6 +545,19 @@ def validate_quality(questions: list[dict]) -> list[str]:
 
 
 def build_rule_fallback_questions(draft: dict) -> list[dict]:
+    target = draft["target_confirmation"]
+    query = target.get("source_job_id") or target.get("marker") or target.get("title") or ""
+    if query:
+        analysis = build_job_skill_analysis(query)
+        if analysis.get("matched") and analysis.get("skill_requirements"):
+            question_set = build_rule_interview_question_set(
+                analysis["job_profile"],
+                analysis["skill_requirements"],
+                question_count=DEFAULT_QUESTION_COUNT,
+            )
+            if question_set["questions"]:
+                return question_set["questions"]
+
     source_items = (draft["job_core_requirements"] + draft["job_core_responsibilities"])[:DEFAULT_QUESTION_COUNT]
     if not source_items:
         source_items = ["目标岗位资料中缺少明确要求，请先补充岗位职责和任职要求。"]

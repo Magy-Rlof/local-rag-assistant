@@ -64,6 +64,7 @@ def build_interview_session(query: str) -> dict:
         "fallback_reason": generated.get("fallback_reason", ""),
         "fallback_detail": generated.get("fallback_detail", ""),
         "validation_errors": generated.get("validation_errors", []),
+        "cache_hit": generated.get("cache_hit", False),
         "questions": questions,
         "answer_guidance": [
             "选择题和判断题用于快速校准岗位要求，不代表你已经具备对应能力。",
@@ -93,6 +94,7 @@ def build_interview_session(query: str) -> dict:
         "fallback_reason": generated.get("fallback_reason", ""),
         "fallback_detail": generated.get("fallback_detail", ""),
         "validation_errors": generated.get("validation_errors", []),
+        "cache_hit": generated.get("cache_hit", False),
     }
 
 

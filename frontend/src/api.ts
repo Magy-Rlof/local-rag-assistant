@@ -45,6 +45,7 @@ export type ChatArtifact = {
   llm_repair_attempted?: boolean;
   fallback_reason?: string;
   fallback_detail?: string;
+  cache_hit?: boolean;
   validation_errors?: string[];
   resume_evidence_status?: string;
   resume_evidence_status_label?: string;
@@ -419,17 +420,21 @@ export type JobMatchReportBatchDeleteResponse = {
 
 export type InterviewQuestion = {
   question_id: number;
-  type?: "single_choice" | "true_false" | "open" | string;
+  type?: "single_choice" | "multiple_choice" | "true_false" | "short_answer" | "open" | string;
+  question_type?: string;
   difficulty?: string;
   skill_area?: string;
+  tested_skill?: string;
   question: string;
+  stem?: string;
   options?: Array<{ key: string; text: string }>;
   correct_answer?: string | string[];
   explanation?: string;
   source_requirement_id?: string;
   source_requirement?: string;
-  source_refs?: Array<{ type: string; source_id: string; relative_path: string; quote: string }>;
+  source_refs?: Array<{ type: string; source_id: string; relative_path: string; quote: string; section?: string }>;
   risk_hint?: string;
+  safety_note?: string;
   requirement: string;
   intent: string;
   answer_checkpoints: string[];
@@ -445,6 +450,7 @@ export type InterviewSession = {
   llm_repair_attempted?: boolean;
   fallback_reason?: string;
   fallback_detail?: string;
+  cache_hit?: boolean;
   validation_errors?: string[];
   questions: InterviewQuestion[];
   answer_guidance: string[];
@@ -465,6 +471,7 @@ export type JobInterviewSessionResponse = {
   llm_repair_attempted?: boolean;
   fallback_reason?: string;
   fallback_detail?: string;
+  cache_hit?: boolean;
   validation_errors?: string[];
 };
 

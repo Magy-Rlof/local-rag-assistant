@@ -35,6 +35,7 @@ from main import (  # noqa: E402
 
 from .document_service import CATEGORIES, get_current_resume_source_candidates, list_documents  # noqa: E402
 from .job_chat_tools import append_job_tool_note, build_job_chat_tool_result  # noqa: E402
+from .job_resolver import extract_job_identifier_terms  # noqa: E402
 from .prompt_templates import build_prompt_for_task  # noqa: E402
 from .task_router import (  # noqa: E402
     TaskType,
@@ -319,6 +320,24 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "job_tool_result": {"artifacts": [], "answer_note": ""},
         }
 
+    job_tool_result = build_job_chat_tool_result(question, safe_history)
+    if job_tool_result.get("answer_note"):
+        return {
+            "messages": [],
+            "direct_answer": job_tool_result["answer_note"],
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
+            "mode": "system",
+            "task_type": task_type,
+            "question": question,
+            "job_tool_result": {
+                "artifacts": job_tool_result["artifacts"],
+                "answer_note": "",
+                "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
+            },
+        }
+
     overview_answer = answer_library_overview_question(question, safe_history)
     if overview_answer:
         return {
@@ -330,24 +349,6 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "task_type": task_type,
             "question": question,
             "job_tool_result": {"artifacts": [], "answer_note": ""},
-        }
-
-    job_tool_result = build_job_chat_tool_result(question, safe_history)
-    if job_tool_result.get("answer_note"):
-        return {
-            "messages": [],
-            "direct_answer": job_tool_result["answer_note"],
-            "sources": [],
-            "retrieval_seconds": 0.0,
-            "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
-            "mode": "chat",
-            "task_type": task_type,
-            "question": question,
-            "job_tool_result": {
-                "artifacts": job_tool_result["artifacts"],
-                "answer_note": "",
-                "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
-            },
         }
 
     if not should_use_rag(question, safe_history, task_type):
@@ -482,18 +483,6 @@ def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
             "artifacts": [],
         }
 
-    overview_answer = answer_library_overview_question(question, safe_history)
-    if overview_answer:
-        return {
-            "answer": overview_answer,
-            "truncated": False,
-            "sources": [],
-            "retrieval_seconds": 0.0,
-            "generation_seconds": 0.0,
-            "mode": "system",
-            "artifacts": [],
-        }
-
     job_tool_result = build_job_chat_tool_result(question, safe_history)
     if job_tool_result.get("answer_note"):
         return {
@@ -504,6 +493,18 @@ def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
             "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
             "mode": "chat",
             "artifacts": job_tool_result["artifacts"],
+        }
+
+    overview_answer = answer_library_overview_question(question, safe_history)
+    if overview_answer:
+        return {
+            "answer": overview_answer,
+            "truncated": False,
+            "sources": [],
+            "retrieval_seconds": 0.0,
+            "generation_seconds": 0.0,
+            "mode": "system",
+            "artifacts": [],
         }
 
     api_key = get_api_key()
@@ -738,6 +739,9 @@ def answer_library_overview_question(question: str, history: list[dict]) -> str:
 
 
 def is_library_overview_question(question: str, history: list[dict]) -> bool:
+    if is_specific_job_identifier_question(question):
+        return False
+
     overview_keywords = ["资料库", "有哪些信息", "有哪些资料", "有哪些文档", "包含什么", "有什么内容"]
     if any(keyword in question for keyword in overview_keywords):
         return True
@@ -750,6 +754,14 @@ def is_library_overview_question(question: str, history: list[dict]) -> bool:
         return any(keyword in recent_text for keyword in overview_keywords)
 
     return False
+
+
+def is_specific_job_identifier_question(question: str) -> bool:
+    lowered = question.lower()
+    if ".md" in lowered or extract_job_identifier_terms(question):
+        return True
+    specific_markers = ("来源岗位 id", "来源岗位ID", "source_job_id", "marker", "刚导入", "唯一写入", "这个岗位")
+    return "岗位" in question and any(marker in question for marker in specific_markers)
 
 
 def get_focused_overview_category(question: str, history: list[dict]) -> str:
@@ -805,6 +817,14 @@ def format_category_summary(category_key: str, label: str) -> str:
 
 
 def answer_system_question(question: str) -> str:
+    compact_question = "".join(question.lower().split())
+    if any(pattern in compact_question for pattern in ("什么是rag", "rag是什么", "简单说下什么是rag")):
+        return (
+            "RAG 是检索增强生成：系统先从本地资料库检索与问题相关的片段，"
+            "再把这些片段作为上下文交给模型或本地规则生成回答，并尽量附上来源引用。"
+            "它适合回答需要结合资料依据的问题，但不能替代对原文和引用的人工核对。"
+        )
+
     model_keywords = ["哪个模型", "什么模型", "使用的模型", "正在使用", "chat模型", "Chat 模型"]
     embedding_keywords = ["embedding", "Embedding", "向量模型", "嵌入模型"]
     vector_keywords = ["向量库", "qdrant", "Qdrant", "collection"]

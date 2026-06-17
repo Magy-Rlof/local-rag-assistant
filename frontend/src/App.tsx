@@ -604,7 +604,7 @@ function ChatArtifactCard({
         <div className="artifact-metric-row">
           {metricEntries.map(([key, value]) => (
             <span className="artifact-metric-chip" key={key}>
-              {formatArtifactMetricLabel(key)}：{String(value)}
+              {formatArtifactMetricLabel(key)}：{formatArtifactMetricValue(key, value)}
             </span>
           ))}
         </div>
@@ -715,13 +715,22 @@ function formatArtifactMetricLabel(key: string) {
     cannot_claim: "不能声称",
     question_count: "题目",
     generation_mode: "生成模式",
+    cache_hit: "缓存",
     single_choice: "选择题",
     multiple_choice: "多选题",
     true_false: "判断题",
+    short_answer: "简答题",
     matched_jobs: "岗位",
     report_count: "报告",
   };
   return labels[key] ?? key;
+}
+
+function formatArtifactMetricValue(key: string, value: string | number | boolean) {
+  if (key === "cache_hit" && typeof value === "boolean") {
+    return value ? "命中" : "未命中";
+  }
+  return String(value);
 }
 
 function downloadChatArtifact(artifact: ChatArtifact) {
@@ -1915,24 +1924,30 @@ function getSelectedInterviewQuestion(
 
 function InterviewQuestionDetail({ question }: { question: InterviewQuestion | null }) {
   if (!question) return <div className="empty-state compact">请选择一个问题。</div>;
+  const questionType = question.question_type || question.type;
+  const questionText = question.stem || question.question;
+  const skillLabel = question.tested_skill || question.skill_area;
+  const riskText = question.safety_note || question.risk_hint || question.risk_reminder;
   const questionTypeLabel =
-    question.type === "single_choice"
+    questionType === "single_choice"
       ? "单选题"
-      : question.type === "multiple_choice"
+      : questionType === "multiple_choice"
         ? "多选题"
-        : question.type === "true_false"
+        : questionType === "true_false"
           ? "判断题"
-          : "开放题";
+          : questionType === "short_answer"
+            ? "简答题"
+            : "开放题";
   const correctAnswer = Array.isArray(question.correct_answer)
-    ? question.correct_answer.join("、")
+    ? question.correct_answer.join(questionType === "short_answer" ? "；" : "、")
     : question.correct_answer || "";
   return (
     <div className="interview-question-detail">
       <div className="interview-question-meta">
         <span>{questionTypeLabel}</span>
-        {question.skill_area && <span>{question.skill_area}</span>}
+        {skillLabel && <span>{skillLabel}</span>}
       </div>
-      <p className="interview-question-main">{question.question}</p>
+      <p className="interview-question-main">{questionText}</p>
       {Boolean(question.options?.length) && (
         <div className="interview-options">
           {question.options?.map((option) => (
@@ -1964,12 +1979,13 @@ function InterviewQuestionDetail({ question }: { question: InterviewQuestion | n
           {question.source_refs?.map((ref, index) => (
             <span key={`${ref.relative_path}-${index}`}>
               {ref.source_id || ref.relative_path || ref.type}
+              {ref.section ? ` · ${ref.section}` : ""}
               {ref.quote ? `：${ref.quote}` : ""}
             </span>
           ))}
         </div>
       )}
-      <div className="warning-box compact-alert">{question.risk_hint || question.risk_reminder}</div>
+      {riskText && <div className="warning-box compact-alert">{riskText}</div>}
     </div>
   );
 }

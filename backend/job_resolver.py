@@ -26,6 +26,11 @@ FIELD_ALIASES = {
     "company_nature": "公司性质",
 }
 
+JOB_IDENTIFIER_PATTERN = re.compile(
+    r"(?i)(?:[a-z][a-z0-9]*_[a-z0-9][a-z0-9_]*|[a-z0-9][a-z0-9_-]+\.md|\b\d{8,}\b)"
+)
+JOB_IDENTIFIER_HINTS = ("stage", "jobonline", "unique", "source_job", "source-job", "job_dedupe")
+
 
 @dataclass(frozen=True)
 class JobCandidate:
@@ -120,7 +125,11 @@ def parse_basic_info(content: str) -> dict[str, str]:
 
 
 def candidate_matches(candidate: JobCandidate, normalized_query: str) -> bool:
-    return any(normalized_query in value for value in searchable_values(candidate))
+    values = searchable_values(candidate)
+    if any(normalized_query in value for value in values):
+        return True
+    terms = extract_job_identifier_terms(normalized_query)
+    return bool(terms) and any(term in value for term in terms for value in values)
 
 
 def match_score(candidate: JobCandidate, normalized_query: str) -> int:
@@ -131,16 +140,28 @@ def match_score(candidate: JobCandidate, normalized_query: str) -> int:
     source_url = normalize(candidate.fields.get(FIELD_ALIASES["source_url"], ""))
 
     if normalized_query in {file_name, file_stem, source_job_id, marker}:
-        return 100
+        return 1000
     if normalized_query and normalized_query in source_job_id:
-        return 90
+        return 900
     if normalized_query and normalized_query in marker:
-        return 85
+        return 850
     if normalized_query and normalized_query in source_url:
-        return 80
+        return 800
     if normalized_query and normalized_query in file_name:
-        return 75
-    return 10
+        return 750
+    term_score = 0
+    for term in extract_job_identifier_terms(normalized_query):
+        if term == source_job_id or term == marker or term == file_stem or term == file_name:
+            term_score += 700
+        elif term and term in source_job_id:
+            term_score += 55 + min(len(term), 20) if len(term) >= 8 else 8
+        elif term and term in marker:
+            term_score += 50 + min(len(term), 20) if len(term) >= 8 else 8
+        elif term and term in file_name:
+            term_score += 45 + min(len(term), 20) if len(term) >= 8 else 8
+        elif term and term in source_url:
+            term_score += 35 + min(len(term), 20) if len(term) >= 8 else 5
+    return term_score or 10
 
 
 def searchable_values(candidate: JobCandidate) -> list[str]:
@@ -198,3 +219,18 @@ def to_source_file(candidate: JobCandidate) -> str:
 
 def normalize(value: str) -> str:
     return value.strip().lower()
+
+
+def extract_job_identifier_terms(text: str) -> list[str]:
+    normalized = normalize(text)
+    terms: list[str] = []
+    for match in JOB_IDENTIFIER_PATTERN.findall(normalized):
+        term = match.strip(" ，,。；;：:（）()[]【】<>《》\"'")
+        if not term or term in terms:
+            continue
+        if "_" in term or term.endswith(".md") or term.isdigit() or any(hint in term for hint in JOB_IDENTIFIER_HINTS):
+            terms.append(term)
+    for hint in JOB_IDENTIFIER_HINTS:
+        if hint in normalized and hint not in terms:
+            terms.append(hint)
+    return terms

@@ -71,6 +71,7 @@ class ChatArtifact(BaseModel):
     llm_repair_attempted: bool = False
     fallback_reason: str = ""
     fallback_detail: str = ""
+    cache_hit: bool = False
     validation_errors: list[str] = Field(default_factory=list)
     resume_evidence_status: str = ""
     resume_evidence_status_label: str = ""
@@ -557,6 +558,7 @@ class InterviewSession(BaseModel):
     llm_repair_attempted: bool = False
     fallback_reason: str = ""
     fallback_detail: str = ""
+    cache_hit: bool = False
     validation_errors: list[str] = Field(default_factory=list)
     questions: list[InterviewQuestion]
     answer_guidance: list[str]
@@ -577,6 +579,7 @@ class JobInterviewSessionResponse(BaseModel):
     llm_repair_attempted: bool = False
     fallback_reason: str = ""
     fallback_detail: str = ""
+    cache_hit: bool = False
     validation_errors: list[str] = Field(default_factory=list)
 
 
