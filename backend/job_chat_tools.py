@@ -17,10 +17,15 @@ from .resume_revision_draft_export import export_resume_revision_draft, read_res
 
 SCOPE_NOTE = "范围限定：仅基于当前资料库、已索引、已合法导入的岗位资料，不代表全网或招聘平台全部岗位。"
 SAFETY_NOTE = "安全边界：不自动投递，不覆盖真实简历，不绕过登录、验证码、反爬或平台限制。"
+MANUAL_SCREENSHOT_MARKER = "manual_screenshot_"
 
 
 def build_job_chat_tool_result(question: str, history: list[dict] | None = None) -> dict:
     current_text = question or ""
+    screenshot_list_answer = build_manual_screenshot_job_list_answer(current_text)
+    if screenshot_list_answer:
+        return {"artifacts": [], "answer_note": screenshot_list_answer, "generation_seconds": 0.0}
+
     direct_lookup_answer = build_direct_job_lookup_answer(current_text)
     if direct_lookup_answer:
         return {"artifacts": [], "answer_note": direct_lookup_answer, "generation_seconds": 0.0}
@@ -184,6 +189,48 @@ def build_direct_job_lookup_answer(text: str) -> str:
         SCOPE_NOTE,
         SAFETY_NOTE,
     ]
+    return "\n".join(lines)
+
+
+def build_manual_screenshot_job_list_answer(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    if not ("截图" in normalized and "岗位" in normalized):
+        return ""
+    if not any(keyword in normalized for keyword in ("刚导入", "导入", "有哪些", "哪些", "列表", "全部")):
+        return ""
+
+    jobs = []
+    for candidate in iter_job_candidates():
+        payload = build_job_payload(candidate)
+        source_id = str(payload.get("source_job_id", ""))
+        source_file = str(payload.get("source_file", ""))
+        marker = str(payload.get("marker", ""))
+        if (
+            source_id.startswith(MANUAL_SCREENSHOT_MARKER)
+            or MANUAL_SCREENSHOT_MARKER in source_file
+            or marker.startswith(MANUAL_SCREENSHOT_MARKER)
+        ):
+            jobs.append(payload)
+
+    if not jobs:
+        return (
+            "当前本地岗位资料库中没有找到截图导入岗位。请确认截图岗位已通过授权导入工作流写入岗位资料目录，"
+            "并且 local-rag-assistant 索引已更新。"
+        )
+
+    jobs.sort(key=lambda job: str(job.get("source_file") or job.get("source_job_id") or ""))
+    lines = ["当前资料库中已导入的截图岗位有：", ""]
+    for index, job in enumerate(jobs, start=1):
+        lines.extend(
+            [
+                f"{index}. {job.get('title') or '未命名岗位'}｜{job.get('company') or '来源未提供'}｜{job.get('city') or '来源未提供'}",
+                f"   - 来源岗位 ID：{job.get('source_job_id') or '来源未提供'}",
+                f"   - 来源文件：{job.get('source_file') or '来源未提供'}",
+            ]
+        )
+    lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
     return "\n".join(lines)
 
 

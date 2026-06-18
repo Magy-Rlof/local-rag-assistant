@@ -571,3 +571,6 @@ def render_question_markdown(question: dict) -> list[str]:
             )
     lines.append(f"- 安全提示：{question.get('safety_note') or question.get('risk_hint', '')}")
     return lines
+
+
+from .job_capability_question_engine import build_rule_interview_question_set  # noqa: E402,F401

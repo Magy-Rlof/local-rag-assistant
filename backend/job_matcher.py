@@ -6,6 +6,13 @@ from .job_resolver import build_job_payload, find_best_job_candidate, to_source_
 
 MAX_EVIDENCE_CHARS = 2200
 
+DESCRIPTION_HEADINGS = ("原始岗位描述", "职位描述", "岗位描述")
+RESPONSIBILITY_HEADINGS = ("岗位职责", "职位职责", "工作职责")
+REQUIREMENT_HEADINGS = ("任职要求", "岗位要求", "职位要求")
+RESPONSIBILITY_MARKERS = ("岗位职责", "职位职责", "工作职责", "岗位描述")
+REQUIREMENT_MARKERS = ("任职要求", "岗位要求", "职位要求")
+TAIL_MARKERS = ("加分项", "薪资待遇", "福利待遇", "公司基本信息", "截图来源说明")
+
 
 def build_job_match_context(query: str) -> dict:
     candidate = find_best_job_candidate(query)
@@ -41,16 +48,31 @@ def build_job_match_context(query: str) -> dict:
 
 
 def build_job_evidence(content: str, title: str, source_file: str) -> dict:
-    raw_description = extract_fenced_text(extract_section(content, "原始岗位描述"))
-    responsibilities_section = clean_section_text(extract_section(content, "岗位职责"))
-    requirements_section = clean_section_text(extract_section(content, "任职要求"))
+    raw_description = extract_fenced_text(extract_first_section(content, DESCRIPTION_HEADINGS))
+    if is_weak_section(raw_description):
+        raw_description = clean_section_text(extract_first_section(content, ("职位描述", "岗位描述")))
+    if is_weak_section(raw_description):
+        raw_description = clean_section_text(content)
+
+    responsibilities_section = clean_section_text(extract_first_section(content, RESPONSIBILITY_HEADINGS))
+    requirements_section = clean_section_text(extract_first_section(content, REQUIREMENT_HEADINGS))
 
     responsibilities = responsibilities_section
     requirements = requirements_section
     if is_weak_section(responsibilities):
-        responsibilities = extract_between(raw_description, "岗位职责", "任职要求") or raw_description
+        responsibilities = (
+            extract_between_any(raw_description, RESPONSIBILITY_MARKERS, REQUIREMENT_MARKERS + TAIL_MARKERS)
+            or responsibilities
+        )
     if is_weak_section(requirements):
-        requirements = extract_after(raw_description, "任职要求") or raw_description
+        requirements = (
+            extract_after_any_until(raw_description, REQUIREMENT_MARKERS, TAIL_MARKERS)
+            or requirements
+        )
+    if is_weak_section(responsibilities):
+        responsibilities = raw_description
+    if is_weak_section(requirements):
+        requirements = raw_description
 
     return {
         "source_file": source_file,
@@ -143,6 +165,14 @@ def extract_section(content: str, heading: str) -> str:
     return content[start:end].strip()
 
 
+def extract_first_section(content: str, headings: tuple[str, ...]) -> str:
+    for heading in headings:
+        section = extract_section(content, heading)
+        if section.strip():
+            return section
+    return ""
+
+
 def extract_fenced_text(section: str) -> str:
     match = re.search(r"```(?:\w+)?\s*(.*?)```", section, re.DOTALL)
     if match:
@@ -178,6 +208,32 @@ def extract_after(text: str, marker: str) -> str:
     if start < 0:
         return ""
     return text[start + len(marker) :].strip()
+
+
+def extract_between_any(text: str, start_markers: tuple[str, ...], end_markers: tuple[str, ...]) -> str:
+    start_positions = [(text.find(marker), marker) for marker in start_markers if text.find(marker) >= 0]
+    if not start_positions:
+        return ""
+    start, marker = min(start_positions, key=lambda item: item[0])
+    start += len(marker)
+    end_positions = [text.find(end_marker, start) for end_marker in end_markers if text.find(end_marker, start) >= 0]
+    end = min(end_positions) if end_positions else len(text)
+    return strip_label_punctuation(text[start:end])
+
+
+def extract_after_any_until(text: str, start_markers: tuple[str, ...], end_markers: tuple[str, ...]) -> str:
+    start_positions = [(text.find(marker), marker) for marker in start_markers if text.find(marker) >= 0]
+    if not start_positions:
+        return ""
+    start, marker = min(start_positions, key=lambda item: item[0])
+    start += len(marker)
+    end_positions = [text.find(end_marker, start) for end_marker in end_markers if text.find(end_marker, start) >= 0]
+    end = min(end_positions) if end_positions else len(text)
+    return strip_label_punctuation(text[start:end])
+
+
+def strip_label_punctuation(text: str) -> str:
+    return re.sub(r"^[：:\s\-]+", "", text.strip())
 
 
 def is_weak_section(text: str) -> bool:
