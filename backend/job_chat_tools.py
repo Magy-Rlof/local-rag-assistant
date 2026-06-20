@@ -1,5 +1,7 @@
+import json
 import re
 from datetime import datetime
+from pathlib import Path
 
 from .job_interview import build_interview_session
 from .job_matcher import build_job_evidence
@@ -18,6 +20,8 @@ from .resume_revision_draft_export import export_resume_revision_draft, read_res
 SCOPE_NOTE = "范围限定：仅基于当前资料库、已索引、已合法导入的岗位资料，不代表全网或招聘平台全部岗位。"
 SAFETY_NOTE = "安全边界：不自动投递，不覆盖真实简历，不绕过登录、验证码、反爬或平台限制。"
 MANUAL_SCREENSHOT_MARKER = "manual_screenshot_"
+WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+PRODUCTION_INTAKE_OUTPUT_DIR = WORKSPACE_ROOT / "tools" / "jobonline-poc" / "output" / "production-job-intake-to-rag"
 
 
 def build_job_chat_tool_result(question: str, history: list[dict] | None = None) -> dict:
@@ -25,6 +29,10 @@ def build_job_chat_tool_result(question: str, history: list[dict] | None = None)
     screenshot_list_answer = build_manual_screenshot_job_list_answer(current_text)
     if screenshot_list_answer:
         return {"artifacts": [], "answer_note": screenshot_list_answer, "generation_seconds": 0.0}
+
+    recent_import_answer = build_recent_imported_job_list_answer(current_text)
+    if recent_import_answer:
+        return {"artifacts": [], "answer_note": recent_import_answer, "generation_seconds": 0.0}
 
     direct_lookup_answer = build_direct_job_lookup_answer(current_text)
     if direct_lookup_answer:
@@ -220,7 +228,6 @@ def build_manual_screenshot_job_list_answer(text: str) -> str:
             "并且 local-rag-assistant 索引已更新。"
         )
 
-    jobs.sort(key=lambda job: str(job.get("source_file") or job.get("source_job_id") or ""))
     lines = ["当前资料库中已导入的截图岗位有：", ""]
     for index, job in enumerate(jobs, start=1):
         lines.extend(
@@ -231,6 +238,121 @@ def build_manual_screenshot_job_list_answer(text: str) -> str:
             ]
         )
     lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def read_json_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def build_recent_production_intake_answer() -> str:
+    manifest = read_json_file(PRODUCTION_INTAKE_OUTPUT_DIR / "manifest.json")
+    audit = read_json_file(PRODUCTION_INTAKE_OUTPUT_DIR / "audit.json")
+    if manifest.get("stage") != "production_job_intake_manifest" and audit.get("stage") != "production_job_intake_audit":
+        return ""
+
+    schema_validation = audit.get("schema_validation") or {}
+    write = audit.get("write") or {}
+    dedupe = audit.get("dedupe") or {}
+    source_stats = audit.get("source_stats") or manifest.get("source_stats") or []
+    files = manifest.get("files") or []
+    source_job_ids = [str(item.get("source_job_id") or "") for item in files if item.get("source_job_id")]
+
+    lines = [
+        "最近一次 n8n production-job-intake-to-rag 导入结果：",
+        "",
+        f"- run_id：{manifest.get('run_id') or audit.get('run_id') or '未记录'}",
+        f"- 状态：{audit.get('status') or '未记录'}",
+        f"- 批量档位：{manifest.get('batch_profile') or audit.get('batch_profile') or '未记录'}",
+        f"- 处理岗位数：{(audit.get('input') or {}).get('processed_count', 0)}",
+        f"- 有效岗位数：{schema_validation.get('valid_count', 0)}",
+        f"- 新写入岗位数：{write.get('written_count', 0)}",
+        f"- 已存在幂等跳过：{write.get('existing_count', 0)}",
+        f"- 重复/跳过：{dedupe.get('skipped_count', 0)}",
+        f"- 进入审核：{dedupe.get('review_required_count', 0)}",
+        f"- 失败项：{len(audit.get('failed_items') or [])}",
+        "",
+        "本轮来源统计：",
+    ]
+    if source_stats:
+        for item in source_stats:
+            lines.append(
+                "- "
+                f"{item.get('source_id') or 'unknown'} / {item.get('connector') or 'unknown'}："
+                f"采集 {item.get('collected_count', 0)}，"
+                f"有效 {item.get('valid_count', 0)}，"
+                f"写入 {item.get('written_count', 0)}，"
+                f"已存在 {item.get('existing_count', 0)}，"
+                f"审核 {item.get('review_count', 0)}，"
+                f"失败 {item.get('failed_count', 0)}"
+            )
+    else:
+        lines.append("- 未记录 source_stats。")
+
+    if source_job_ids:
+        lines.extend(["", "本轮 manifest 中的岗位 ID："])
+        for index, source_job_id in enumerate(source_job_ids[:20], start=1):
+            lines.append(f"{index}. {source_job_id}")
+        if len(source_job_ids) > 20:
+            lines.append(f"... 其余 {len(source_job_ids) - 20} 条见 manifest.json")
+
+    lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def build_recent_imported_job_list_answer(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    if not any(keyword in normalized for keyword in ("资料库", "岗位资料", "刚导入", "导入", "新增")):
+        return ""
+    if not any(keyword in normalized for keyword in ("岗位", "职位", "JD", "jd")):
+        return ""
+    if not any(keyword in normalized for keyword in ("有哪些", "哪些", "列出", "清单", "列表", "刚导入")):
+        return ""
+
+    recent_run_answer = build_recent_production_intake_answer()
+    if recent_run_answer:
+        return recent_run_answer
+
+    jobs = []
+    for candidate in iter_job_candidates():
+        payload = build_job_payload(candidate)
+        source_file = str(payload.get("source_file") or "")
+        if source_file.startswith("private_data/job_descriptions/"):
+            jobs.append(payload)
+
+    if not jobs:
+        return (
+            "当前本地岗位资料库中没有找到已导入岗位。请先通过 n8n 的合法授权导入工作流写入岗位资料，"
+            "再更新索引或使用岗位 ID 精确查询。"
+        )
+
+    jobs = jobs[:10]
+    lines = [
+        "当前本地岗位资料库中最近可见的岗位包括：",
+        "",
+    ]
+    for index, job in enumerate(jobs, start=1):
+        lines.extend(
+            [
+                f"{index}. {job.get('title') or '未命名岗位'} - {job.get('company') or '来源未提供'} - {job.get('city') or '来源未提供'}",
+                f"   - 来源岗位 ID：{job.get('source_job_id') or '来源未提供'}",
+                f"   - 来源文件：{job.get('source_file') or '来源未提供'}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "范围限定：仅基于当前 local-rag-assistant 本地岗位资料库，不代表全网或招聘平台全部岗位。",
+            "安全边界：不自动投递，不覆盖真实简历，不绕过登录、验证码、反爬或平台限制。",
+        ]
+    )
     return "\n".join(lines)
 
 

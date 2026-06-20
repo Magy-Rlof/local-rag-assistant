@@ -2506,6 +2506,108 @@ textarea:focus-visible {
   margin-top: 6px;
 }
 
+.production-status-panel {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.production-status-heading {
+  align-items: flex-start;
+}
+
+.production-status-heading .small-button {
+  min-width: 78px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.production-status-heading p {
+  max-width: 920px;
+  overflow-wrap: anywhere;
+}
+
+.production-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.production-metric {
+  min-width: 0;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+}
+
+.production-metric span,
+.production-metric small,
+.detail-label,
+.detail-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.production-metric strong {
+  display: block;
+  margin: 4px 0 2px;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.production-metric small {
+  display: block;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.production-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.production-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+}
+
+.detail-value {
+  margin-top: 4px;
+  font-weight: 800;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.detail-note {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.production-boundary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--success);
+  background: var(--success-soft);
+  border: 1px solid #abefc6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.production-boundary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .log-list {
   min-height: 0;
   overflow: auto;
@@ -2671,6 +2773,11 @@ textarea:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .production-metric-grid,
+  .production-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .agent-subtab {
     flex-basis: 190px;
   }
@@ -2687,6 +2794,11 @@ textarea:focus-visible {
 
   .nav-list,
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .production-metric-grid,
+  .production-detail-grid {
     grid-template-columns: 1fr;
   }
 

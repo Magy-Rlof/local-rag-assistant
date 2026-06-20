@@ -9,7 +9,9 @@ from .job_match_draft_export import (
     render_evidence_required,
     render_interview_only,
     render_list,
+    render_source_refs,
 )
+from .resume_backup import create_current_resume_backup
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,10 +33,15 @@ def export_resume_revision_draft(query: str, confirm_save: bool, note: str = "")
             "relative_path": "",
             "size_bytes": 0,
             "content_preview": "",
+            "resume_backup": None,
             "warnings": draft_response["warnings"],
         }
 
-    content = render_resume_revision_content(draft_response, note)
+    resume_backup = create_current_resume_backup(
+        draft_response["current_resume"],
+        reason="before_resume_revision_draft_export",
+    )
+    content = render_resume_revision_content(draft_response, note, resume_backup)
     file_name = build_resume_revision_file_name(draft_response["draft"]["target_confirmation"])
     target_path = unique_export_path(file_name)
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,6 +56,7 @@ def export_resume_revision_draft(query: str, confirm_save: bool, note: str = "")
         "relative_path": target_path.relative_to(PROJECT_ROOT).as_posix(),
         "size_bytes": target_path.stat().st_size,
         "content_preview": content[:500],
+        "resume_backup": resume_backup,
         "warnings": build_resume_revision_warnings(draft_response),
     }
 
@@ -122,7 +130,7 @@ def resolve_export_file(file_name: str) -> Path:
     return candidate
 
 
-def render_resume_revision_content(draft_response: dict, note: str) -> str:
+def render_resume_revision_content(draft_response: dict, note: str, resume_backup: dict | None = None) -> str:
     draft = draft_response["draft"]
     confirmation = draft["target_confirmation"]
     current_resume = draft_response["current_resume"]
@@ -153,6 +161,7 @@ def render_resume_revision_content(draft_response: dict, note: str) -> str:
         f"- 当前简历：{format_current_resume(current_resume)}",
         f"- 草稿生成时间：{datetime.now().isoformat(timespec='seconds')}",
     ]
+    lines.extend(render_resume_backup_section(resume_backup))
     if note.strip():
         lines.extend(["", "## 用户备注", "", note.strip()])
 
@@ -165,6 +174,7 @@ def render_resume_revision_content(draft_response: dict, note: str) -> str:
             f"- 不能声称能力：{len(revision['cannot_claim'])} 条",
         ]
     )
+    lines.extend(render_auditable_modified_resume_section(current_resume, confirmation, revision))
     lines.extend(["", "## 可写入简历候选", ""])
     if revision["can_write_to_resume"]:
         lines.extend(render_list(revision["can_write_to_resume"]))
@@ -176,6 +186,8 @@ def render_resume_revision_content(draft_response: dict, note: str) -> str:
     lines.extend(render_interview_only(revision["interview_only"]))
     lines.extend(["", "## 不能写入简历的能力边界", ""])
     lines.extend(render_cannot_claim(revision["cannot_claim"]))
+    lines.extend(["", "## source_refs", ""])
+    lines.extend(render_source_refs(draft))
     lines.extend(["", "## 建议人工审核动作", ""])
     lines.extend(
         [
@@ -192,6 +204,65 @@ def render_resume_revision_content(draft_response: dict, note: str) -> str:
     lines.extend(render_list(build_resume_revision_warnings(draft_response)))
     lines.append("")
     return "\n".join(lines)
+
+
+def render_resume_backup_section(resume_backup: dict | None) -> list[str]:
+    lines = ["", "## 原简历备份证据", ""]
+    if not resume_backup:
+        lines.extend(
+            [
+                "- backup_created: false",
+                "- reason: current_resume_not_set_or_not_readable",
+                "- next_action: set_current_resume_before_resume_revision",
+            ]
+        )
+        return lines
+    lines.extend(
+        [
+            "- backup_created: true",
+            f"- original_name: {resume_backup['original_name']}",
+            f"- original_source: {resume_backup['original_source']}",
+            f"- original_relative_path: {resume_backup['original_relative_path']}",
+            f"- backup_relative_path: {resume_backup['backup_relative_path']}",
+            f"- backup_metadata_relative_path: {resume_backup['metadata_relative_path']}",
+            f"- backup_size_bytes: {resume_backup['backup_size_bytes']}",
+            f"- backup_sha256: {resume_backup['sha256']}",
+            "- backup_indexed_by_default: false",
+            "- restore_policy: manual_restore_only_no_auto_overwrite",
+        ]
+    )
+    return lines
+
+
+def render_auditable_modified_resume_section(
+    current_resume: dict | None,
+    confirmation: dict,
+    revision: dict,
+) -> list[str]:
+    lines = [
+        "",
+        "## 可审核修改版简历草稿",
+        "",
+        "- 本节是基于备份后的当前简历生成的人工审核候选版本，不是正式简历。",
+        "- 系统不会自动覆盖真实简历；如需采用，只能由用户人工复制并审核。",
+        f"- 目标岗位：{confirmation['title']} / {confirmation['company']} / {confirmation['city']}",
+        f"- 当前简历：{format_current_resume(current_resume)}",
+        "",
+        "### 建议新增或调整的简历表达",
+        "",
+    ]
+    if revision["can_write_to_resume"]:
+        lines.extend(render_list(revision["can_write_to_resume"]))
+    else:
+        lines.append("- 暂无可直接写入的表达；当前草稿不建议新增未经证据支持的能力。")
+
+    lines.extend(["", "### 待补证据后再决定是否写入", ""])
+    lines.extend(render_evidence_required(revision["requires_evidence_before_resume"]))
+    lines.extend(["", "### 仅保留为面试准备，不写入正式简历", ""])
+    lines.extend(render_interview_only(revision["interview_only"]))
+    lines.extend(["", "### 不得写入正式简历的内容", ""])
+    lines.extend(render_cannot_claim(revision["cannot_claim"]))
+    return lines
 
 
 def build_resume_revision_file_name(confirmation: dict) -> str:
@@ -223,6 +294,10 @@ def slugify(value: str) -> str:
 
 def build_resume_revision_warnings(draft_response: dict) -> list[str]:
     warnings = list(draft_response["warnings"])
+    if draft_response.get("current_resume"):
+        warnings.append("已在生成简历差异草稿前创建当前简历备份；备份仅供人工恢复，不会自动覆盖真实简历。")
+    else:
+        warnings.append("当前未设置简历，未创建原简历备份。")
     warnings.append("已保存为单独简历差异草稿副本，未覆盖真实简历。")
     warnings.append("该草稿目录不加入默认资料分类，避免污染 RAG 索引。")
     warnings.append("该草稿不能自动投递，不能自动写回真实简历。")

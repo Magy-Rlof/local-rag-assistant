@@ -97,6 +97,68 @@ export type IndexResponse = {
   logs: string[];
 };
 
+export type ProductionRunSummary = {
+  run_number: number;
+  loop_id: string;
+  title: string;
+  status: string;
+  theme: string;
+  modified_at: string;
+  relative_path: string;
+};
+
+export type ProductionSourceSummary = {
+  status: string;
+  source_id: string;
+  source_name: string;
+  gate_decision: string;
+  gate_allowed: boolean;
+  channel: string;
+  collected_count: number;
+  schema_valid: boolean;
+  schema_error_count: number;
+  evidence_file: string;
+};
+
+export type ProductionWriteSummary = {
+  written_count: number;
+  skipped_count: number;
+  failed_count: number;
+  job_file_count: number;
+  out_dir: string;
+};
+
+export type ProductionReviewSummary = {
+  pending_count: number;
+  job_report_count: number;
+  batch_queue_count: number;
+  resume_write_review_count: number;
+  resume_draft_count: number;
+  job_draft_count: number;
+};
+
+export type ProductionIndexSummary = {
+  status: string;
+  indexed_count: number;
+  skipped_count: number;
+  failed_count: number;
+  changed_source_count: number;
+  pending_count: number;
+  evidence_file: string;
+};
+
+export type ProductionWorkbenchStatus = {
+  generated_at: string;
+  latest_run: ProductionRunSummary | null;
+  runs: ProductionRunSummary[];
+  source: ProductionSourceSummary;
+  write: ProductionWriteSummary;
+  review: ProductionReviewSummary;
+  index: ProductionIndexSummary;
+  boundaries: string[];
+  warnings: string[];
+};
+
 export type JobBasicInfo = {
   title: string;
   company: string;
@@ -714,6 +776,11 @@ export async function buildIndex(): Promise<IndexResponse> {
     method: "POST"
   });
   return parseResponse<IndexResponse>(response);
+}
+
+export async function getProductionWorkbenchStatus(): Promise<ProductionWorkbenchStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/production/status`);
+  return parseResponse<ProductionWorkbenchStatus>(response);
 }
 
 export async function buildJobAgentSummary(query: string): Promise<JobAgentSummaryResponse> {

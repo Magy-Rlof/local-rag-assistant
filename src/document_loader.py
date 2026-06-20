@@ -5,6 +5,17 @@ from pypdf import PdfReader
 
 
 SUPPORTED_SUFFIXES = {".md", ".docx", ".pdf"}
+DEFAULT_PRIVATE_EXCLUDED_PREFIXES = {
+    "_selftest_tmp/",
+    "gui_test_logs/",
+    "job_match_drafts/",
+    "job_match_report_batches/",
+    "job_match_reports/",
+    "rendered_mock_resume/",
+    "resume_backups/",
+    "resume_revision_drafts/",
+    "resume_write_reviews/",
+}
 
 
 def load_knowledge_documents(
@@ -18,7 +29,13 @@ def load_knowledge_documents(
         documents.extend(load_documents_from_dir(data_dir, source_prefix=""))
 
     if private_data_dir.exists():
-        documents.extend(load_documents_from_dir(private_data_dir, source_prefix="private_data"))
+        documents.extend(
+            load_documents_from_dir(
+                private_data_dir,
+                source_prefix="private_data",
+                exclude_relative_prefixes=DEFAULT_PRIVATE_EXCLUDED_PREFIXES,
+            )
+        )
 
     if not documents:
         raise RuntimeError("没有找到可加载的知识库文档。")
@@ -26,16 +43,26 @@ def load_knowledge_documents(
     return documents
 
 
-def load_documents_from_dir(directory: Path, source_prefix: str) -> list[tuple[str, str]]:
+def load_documents_from_dir(
+    directory: Path,
+    source_prefix: str,
+    *,
+    exclude_relative_prefixes: set[str] | None = None,
+) -> list[tuple[str, str]]:
     if not directory.exists():
         raise RuntimeError(f"数据目录不存在：{directory}")
 
+    excluded = exclude_relative_prefixes or set()
     documents = []
     for path in sorted(directory.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
             continue
 
-        source_file = path.relative_to(directory).as_posix()
+        relative_source_file = path.relative_to(directory).as_posix()
+        if any(relative_source_file.startswith(prefix) for prefix in excluded):
+            continue
+
+        source_file = relative_source_file
         if source_prefix:
             source_file = f"{source_prefix}/{source_file}"
 

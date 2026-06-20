@@ -63,6 +63,7 @@ from .resume_write_review_queue import (  # noqa: E402
 )
 from .job_interview import build_interview_feedback, build_interview_session  # noqa: E402
 from .job_agent_summary import build_job_agent_summary  # noqa: E402
+from .production_status import get_production_workbench_status  # noqa: E402
 from .rag_service import ask_with_rag, stream_event, stream_with_rag  # noqa: E402
 from .schemas import (  # noqa: E402
     AskRequest,
@@ -91,6 +92,7 @@ from .schemas import (  # noqa: E402
     JobMatchReportBatchReviewUpdateResponse,
     JobMatchReportReviewUpdateRequest,
     JobMatchReportReviewUpdateResponse,
+    ProductionWorkbenchStatusResponse,
     JobInterviewFeedbackResponse,
     JobInterviewSessionResponse,
     JobMatchContextResponse,
@@ -119,6 +121,7 @@ app = FastAPI(title="Local RAG Assistant API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -133,6 +136,11 @@ def startup() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/production/status", response_model=ProductionWorkbenchStatusResponse)
+def production_workbench_status() -> dict:
+    return get_production_workbench_status()
 
 
 @app.get("/api/categories")

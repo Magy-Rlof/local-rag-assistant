@@ -258,6 +258,23 @@ class ResumeRevisionDraftExportRequest(BaseModel):
     note: str = ""
 
 
+class ResumeBackupInfo(BaseModel):
+    created: bool
+    created_at: str
+    reason: str
+    original_name: str
+    original_source: str
+    original_relative_path: str
+    original_size_bytes: int
+    backup_file_name: str
+    backup_relative_path: str
+    backup_size_bytes: int
+    sha256: str
+    metadata_relative_path: str
+    not_indexed_by_default: bool
+    restore_note: str
+
+
 class ResumeRevisionDraftExportResponse(BaseModel):
     exported: bool
     query: str
@@ -267,6 +284,7 @@ class ResumeRevisionDraftExportResponse(BaseModel):
     relative_path: str
     size_bytes: int
     content_preview: str
+    resume_backup: ResumeBackupInfo | None = None
     warnings: list[str]
 
 
@@ -681,3 +699,65 @@ class IndexResponse(BaseModel):
     collection_name: str
     storage_path: str
     logs: list[str]
+
+
+class ProductionRunSummary(BaseModel):
+    run_number: int
+    loop_id: str
+    title: str
+    status: str
+    theme: str
+    modified_at: str
+    relative_path: str
+
+
+class ProductionSourceSummary(BaseModel):
+    status: str
+    source_id: str
+    source_name: str
+    gate_decision: str
+    gate_allowed: bool
+    channel: str
+    collected_count: int
+    schema_valid: bool
+    schema_error_count: int
+    evidence_file: str
+
+
+class ProductionWriteSummary(BaseModel):
+    written_count: int
+    skipped_count: int
+    failed_count: int
+    job_file_count: int
+    out_dir: str
+
+
+class ProductionReviewSummary(BaseModel):
+    pending_count: int
+    job_report_count: int
+    batch_queue_count: int
+    resume_write_review_count: int
+    resume_draft_count: int
+    job_draft_count: int
+
+
+class ProductionIndexSummary(BaseModel):
+    status: str
+    indexed_count: int
+    skipped_count: int
+    failed_count: int
+    changed_source_count: int
+    pending_count: int
+    evidence_file: str
+
+
+class ProductionWorkbenchStatusResponse(BaseModel):
+    generated_at: str
+    latest_run: ProductionRunSummary | None
+    runs: list[ProductionRunSummary]
+    source: ProductionSourceSummary
+    write: ProductionWriteSummary
+    review: ProductionReviewSummary
+    index: ProductionIndexSummary
+    boundaries: list[str]
+    warnings: list[str]

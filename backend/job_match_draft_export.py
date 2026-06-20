@@ -167,6 +167,8 @@ def render_export_content(draft_response: dict, note: str) -> str:
     lines.extend(render_cannot_claim(draft["resume_revision_candidates"]["cannot_claim"]))
     lines.extend(["", "## 面试准备问题", ""])
     lines.extend(render_list(draft["interview_questions"]))
+    lines.extend(["", "## source_refs", ""])
+    lines.extend(render_source_refs(draft))
     lines.extend(["", "## 证据缺口", ""])
     lines.extend(render_list(draft["evidence_gaps"]))
     lines.extend(["", "## 安全说明", ""])
@@ -244,6 +246,27 @@ def render_interview_only(items: list[dict]) -> list[str]:
     for item in items:
         lines.append(f"- 主题：{item['topic']}")
         lines.append(f"  - 用途：{item['usage']}")
+    return lines
+
+
+def render_source_refs(draft: dict) -> list[str]:
+    confirmation = draft["target_confirmation"]
+    source_file = confirmation.get("source_file", "")
+    source_job_id = confirmation.get("source_job_id", "")
+    source_url = confirmation.get("source_url", "")
+    source_items = []
+    for section, items in (
+        ("岗位核心要求", draft.get("job_core_requirements", [])),
+        ("岗位核心职责", draft.get("job_core_responsibilities", [])),
+        ("面试准备问题", draft.get("interview_questions", [])),
+    ):
+        for item in items[:8]:
+            source_items.append((section, item))
+    if not source_items:
+        return [f"- job_description | {source_job_id} | {source_file} | 目标岗位确认 | {source_url}"]
+    lines = []
+    for section, quote in source_items[:12]:
+        lines.append(f"- job_description | {source_job_id} | {source_file} | {section} | {quote}")
     return lines
 
 

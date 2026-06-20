@@ -46,6 +46,7 @@ import {
   exportJobMatchDraft,
   exportJobMatchReport,
   exportResumeRevisionDraft,
+  getProductionWorkbenchStatus,
   getCurrentResume,
   JobInterviewFeedbackResponse,
   JobInterviewSessionResponse,
@@ -58,6 +59,7 @@ import {
   JobMatchReportExportFile,
   JobMatchReportExportContentResponse,
   JobMatchDraftResponse,
+  ProductionWorkbenchStatus,
   listJobMatchDraftExports,
   listJobMatchReportBatchQueues,
   listJobMatchReportExports,
@@ -272,9 +274,9 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
     saveAskSelectedArtifact(selectedArtifact);
   }, [selectedArtifact]);
 
-  async function submitQuestion() {
+  async function submitQuestion(nextQuestion?: string) {
     if (loading) return;
-    const trimmedQuestion = question.trim();
+    const trimmedQuestion = (nextQuestion ?? question).trim();
     if (!trimmedQuestion) {
       setError("请输入问题。");
       return;
@@ -302,7 +304,11 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
       response: createEmptyAskResponse(),
     };
     setMessages((currentMessages) => [...currentMessages, userMessage, assistantMessage]);
-    setQuestion("");
+    if (!nextQuestion) {
+      setQuestion("");
+    } else {
+      setQuestion("");
+    }
     try {
       const finalResponse = await askQuestionStream(trimmedQuestion, history, {
         onMeta: (meta) => {
@@ -509,7 +515,7 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
             <div className="composer-actions">
               <button
                 className="send-button"
-                onClick={submitQuestion}
+                onClick={() => submitQuestion()}
                 disabled={loading || !question.trim()}
                 aria-label="发送消息"
                 title="发送消息"
@@ -2374,6 +2380,25 @@ function IndexPage({
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [productionStatus, setProductionStatus] = useState<ProductionWorkbenchStatus | null>(null);
+  const [productionLoading, setProductionLoading] = useState(false);
+  const [productionError, setProductionError] = useState("");
+
+  useEffect(() => {
+    refreshProductionStatus();
+  }, []);
+
+  async function refreshProductionStatus() {
+    setProductionLoading(true);
+    setProductionError("");
+    try {
+      setProductionStatus(await getProductionWorkbenchStatus());
+    } catch (requestError) {
+      setProductionError(formatRequestError(requestError, "读取生产运行状态失败。"));
+    } finally {
+      setProductionLoading(false);
+    }
+  }
 
   async function handleBuildIndex() {
     setLoading(true);
@@ -2402,6 +2427,12 @@ function IndexPage({
   return (
     <section className="page index-page">
       <PageHeader title="索引状态" />
+      <ProductionStatusPanel
+        status={productionStatus}
+        loading={productionLoading}
+        error={productionError}
+        onRefresh={refreshProductionStatus}
+      />
       <div className="index-actions">
         <button className="primary-button" onClick={handleBuildIndex} disabled={loading}>
           {loading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
@@ -2436,6 +2467,113 @@ function IndexPage({
       </section>
     </section>
   );
+}
+
+function ProductionStatusPanel({
+  status,
+  loading,
+  error,
+  onRefresh,
+}: {
+  status: ProductionWorkbenchStatus | null;
+  loading: boolean;
+  error: string;
+  onRefresh: () => void;
+}) {
+  const latestRun = status?.latest_run;
+  const source = status?.source;
+  const write = status?.write;
+  const review = status?.review;
+  const index = status?.index;
+  const metrics = [
+    ["来源", source?.gate_allowed ? "已放行" : "待确认", source?.source_name || source?.source_id || "暂无证据"],
+    ["写入", write?.written_count ?? 0, `${write?.job_file_count ?? 0} 个岗位文件`],
+    ["跳过", write?.skipped_count ?? 0, "去重或未变化"],
+    ["失败", (write?.failed_count ?? 0) + (index?.failed_count ?? 0), "写入/索引失败"],
+    ["待审核", review?.pending_count ?? 0, "报告/批次/写回"],
+    ["索引", index?.status ? formatProductionIndexStatus(index.status) : "未知", `${index?.pending_count ?? 0} 待索引`],
+  ] as const;
+
+  return (
+    <section className="panel production-status-panel" aria-label="生产运行状态">
+      <div className="panel-heading production-status-heading">
+        <div>
+          <h2>生产运行</h2>
+          <p>
+            {latestRun
+              ? `最近 RUN ${latestRun.run_number}：${latestRun.status} · ${latestRun.theme || latestRun.loop_id}`
+              : "暂无 RUN 记录"}
+          </p>
+        </div>
+        <button className="secondary-button small-button" type="button" onClick={onRefresh} disabled={loading}>
+          {loading ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+          刷新
+        </button>
+      </div>
+      {error && <div className="error-box compact-alert">{error}</div>}
+      {!status && !error && <div className="empty-state compact">正在读取生产运行证据。</div>}
+      {status && (
+        <>
+          <div className="production-metric-grid">
+            {metrics.map(([label, value, detail]) => (
+              <div className="production-metric" key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>{detail}</small>
+              </div>
+            ))}
+          </div>
+          <div className="production-detail-grid">
+            <div className="production-detail">
+              <div className="detail-label">来源门禁</div>
+              <div className="detail-value">
+                {source?.gate_decision || "unknown"} · {source?.channel || "无来源通道"}
+              </div>
+              <div className="detail-note">
+                采集 {source?.collected_count ?? 0} · schema 错误 {source?.schema_error_count ?? 0}
+              </div>
+            </div>
+            <div className="production-detail">
+              <div className="detail-label">审核队列</div>
+              <div className="detail-value">
+                报告 {review?.job_report_count ?? 0} · 批次 {review?.batch_queue_count ?? 0} · 写回 {review?.resume_write_review_count ?? 0}
+              </div>
+              <div className="detail-note">
+                简历草稿 {review?.resume_draft_count ?? 0} · 岗位草稿 {review?.job_draft_count ?? 0}
+              </div>
+            </div>
+            <div className="production-detail">
+              <div className="detail-label">索引证据</div>
+              <div className="detail-value">
+                变化 {index?.changed_source_count ?? 0} · 索引 {index?.indexed_count ?? 0} · 跳过 {index?.skipped_count ?? 0}
+              </div>
+              <div className="detail-note" title={index?.evidence_file || ""}>
+                {index?.evidence_file || "暂无证据文件"}
+              </div>
+            </div>
+          </div>
+          {status.warnings.length > 0 && (
+            <div className="warning-box compact-alert">
+              {status.warnings.map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          )}
+          <div className="production-boundary">
+            <ShieldCheck size={16} />
+            <span>{status.boundaries[0]}</span>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function formatProductionIndexStatus(status: string) {
+  if (status === "verified_by_run6") return "RUN6 已验";
+  if (status === "success") return "成功";
+  if (status === "failed") return "失败";
+  return status || "未知";
 }
 
 function PageHeader({ title, description }: { title: string; description?: string }) {
