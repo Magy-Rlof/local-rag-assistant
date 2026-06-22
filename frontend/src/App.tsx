@@ -684,10 +684,15 @@ function ChatArtifactPreview({
 
 function getArtifactPreviewMarkdown(artifact: ChatArtifact) {
   const markdown = artifact.content_markdown || artifact.content_preview || "暂无预览内容。";
+  const userFacingMarkdown = removeMarkdownSections(markdown, [
+    "## source_refs",
+    "## 原始 warnings",
+    "## 原简历备份证据",
+  ]);
   if (artifact.type === "interview_session") {
-    return stripMarkdownSections(markdown, ["## 回答边界", "## 来源与安全边界"]);
+    return stripMarkdownSections(userFacingMarkdown, ["## 回答边界", "## 来源与安全边界"]);
   }
-  return stripMarkdownSections(markdown, ["## 来源与安全边界", "## 原始 warnings"]);
+  return stripMarkdownSections(userFacingMarkdown, ["## 来源与安全边界"]);
 }
 
 function stripMarkdownSections(markdown: string, headings: string[]) {
@@ -697,6 +702,24 @@ function stripMarkdownSections(markdown: string, headings: string[]) {
     if (index >= 0) result = result.slice(0, index).trim();
   }
   return result || markdown;
+}
+
+function removeMarkdownSections(markdown: string, headings: string[]) {
+  let result = markdown;
+  for (const heading of headings) {
+    const escapedHeading = escapeRegExp(heading);
+    const sectionPattern = new RegExp(`\\n?${escapedHeading}\\n[\\s\\S]*?(?=\\n##\\s|$)`, "g");
+    result = result.replace(sectionPattern, "");
+  }
+  return result.trim() || markdown;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getUserFacingDraftMarkdown(markdown: string) {
+  return removeMarkdownSections(markdown, ["## source_refs", "## 原始 warnings", "## 原简历备份证据"]);
 }
 
 function getArtifactHighlights(artifact: ChatArtifact) {
@@ -1894,7 +1917,7 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
                       <h3>差异草稿</h3>
                       <p title={resumeDiffCompare.relative_path}>{resumeDiffCompare.relative_path}</p>
                       <article className="markdown-preview compare-markdown">
-                        <ReactMarkdown>{resumeDiffCompare.resume_diff_content}</ReactMarkdown>
+                        <ReactMarkdown>{getUserFacingDraftMarkdown(resumeDiffCompare.resume_diff_content)}</ReactMarkdown>
                       </article>
                     </section>
                   </div>
@@ -1908,7 +1931,7 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
                 </div>
               )}
               <article className="markdown-preview draft-markdown-preview">
-                <ReactMarkdown>{selectedCopy.content}</ReactMarkdown>
+                <ReactMarkdown>{getUserFacingDraftMarkdown(selectedCopy.content)}</ReactMarkdown>
               </article>
             </div>
           )}
@@ -1978,18 +2001,6 @@ function InterviewQuestionDetail({ question }: { question: InterviewQuestion | n
       </ul>
       {(question.source_requirement || question.requirement) && (
         <div className="artifact-detail-path">来源岗位要求：{question.source_requirement || question.requirement}</div>
-      )}
-      {Boolean(question.source_refs?.length) && (
-        <div className="interview-source-refs">
-          <strong>来源引用</strong>
-          {question.source_refs?.map((ref, index) => (
-            <span key={`${ref.relative_path}-${index}`}>
-              {ref.source_id || ref.relative_path || ref.type}
-              {ref.section ? ` · ${ref.section}` : ""}
-              {ref.quote ? `：${ref.quote}` : ""}
-            </span>
-          ))}
-        </div>
       )}
       {riskText && <div className="warning-box compact-alert">{riskText}</div>}
     </div>

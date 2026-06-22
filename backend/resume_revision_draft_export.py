@@ -9,7 +9,6 @@ from .job_match_draft_export import (
     render_evidence_required,
     render_interview_only,
     render_list,
-    render_source_refs,
 )
 from .resume_backup import create_current_resume_backup
 
@@ -152,9 +151,6 @@ def render_resume_revision_content(draft_response: dict, note: str, resume_backu
         f"- 公司：{confirmation['company']}",
         f"- 城市：{confirmation['city']}",
         f"- 来源岗位 ID：{confirmation['source_job_id']}",
-        f"- 来源标识：{confirmation['marker']}",
-        f"- 来源文件：{confirmation['source_file']}",
-        f"- 来源 URL：{confirmation['source_url']}",
         "",
         "## 当前简历状态",
         "",
@@ -186,8 +182,6 @@ def render_resume_revision_content(draft_response: dict, note: str, resume_backu
     lines.extend(render_interview_only(revision["interview_only"]))
     lines.extend(["", "## 不能写入简历的能力边界", ""])
     lines.extend(render_cannot_claim(revision["cannot_claim"]))
-    lines.extend(["", "## source_refs", ""])
-    lines.extend(render_source_refs(draft))
     lines.extend(["", "## 建议人工审核动作", ""])
     lines.extend(
         [
@@ -207,28 +201,21 @@ def render_resume_revision_content(draft_response: dict, note: str, resume_backu
 
 
 def render_resume_backup_section(resume_backup: dict | None) -> list[str]:
-    lines = ["", "## 原简历备份证据", ""]
+    lines = ["", "## 原简历备份", ""]
     if not resume_backup:
         lines.extend(
             [
-                "- backup_created: false",
-                "- reason: current_resume_not_set_or_not_readable",
-                "- next_action: set_current_resume_before_resume_revision",
+                "- 当前未创建原简历备份。",
+                "- 请先在简历中心设置当前简历，再生成可审核修改版。",
             ]
         )
         return lines
     lines.extend(
         [
-            "- backup_created: true",
-            f"- original_name: {resume_backup['original_name']}",
-            f"- original_source: {resume_backup['original_source']}",
-            f"- original_relative_path: {resume_backup['original_relative_path']}",
-            f"- backup_relative_path: {resume_backup['backup_relative_path']}",
-            f"- backup_metadata_relative_path: {resume_backup['metadata_relative_path']}",
-            f"- backup_size_bytes: {resume_backup['backup_size_bytes']}",
-            f"- backup_sha256: {resume_backup['sha256']}",
-            "- backup_indexed_by_default: false",
-            "- restore_policy: manual_restore_only_no_auto_overwrite",
+            "- 已在生成草稿前备份当前简历。",
+            f"- 原简历：{resume_backup['original_name']}",
+            f"- 备份时间：{resume_backup['created_at']}",
+            "- 备份仅用于人工恢复，系统不会自动覆盖真实简历。",
         ]
     )
     return lines

@@ -66,9 +66,18 @@ def find_best_job_candidate(query: str) -> JobCandidate | None:
     if not normalized_query:
         raise ValueError("查询内容不能为空。")
 
+    candidates = find_job_candidates(query, limit=None)
+    return candidates[0] if candidates else None
+
+
+def find_job_candidates(query: str, limit: int | None = 5) -> list[JobCandidate]:
+    normalized_query = normalize(query)
+    if not normalized_query:
+        raise ValueError("query cannot be empty")
+
     candidates = [candidate for candidate in iter_job_candidates() if candidate_matches(candidate, normalized_query)]
     candidates.sort(key=lambda candidate: match_score(candidate, normalized_query), reverse=True)
-    return candidates[0] if candidates else None
+    return candidates if limit is None else candidates[:limit]
 
 
 def iter_job_candidates() -> list[JobCandidate]:
@@ -128,6 +137,10 @@ def candidate_matches(candidate: JobCandidate, normalized_query: str) -> bool:
     values = searchable_values(candidate)
     if any(normalized_query in value for value in values):
         return True
+    compact_query = normalize_compact(normalized_query)
+    compact_values = [normalize_compact(value) for value in values]
+    if compact_query and any(compact_query in value or value in compact_query for value in compact_values if value):
+        return True
     terms = extract_job_identifier_terms(normalized_query)
     return bool(terms) and any(term in value for term in terms for value in values)
 
@@ -135,18 +148,27 @@ def candidate_matches(candidate: JobCandidate, normalized_query: str) -> bool:
 def match_score(candidate: JobCandidate, normalized_query: str) -> int:
     file_name = normalize(candidate.path.name)
     file_stem = normalize(candidate.path.stem)
+    title = normalize(candidate.title)
+    title_compact = normalize_compact(candidate.title)
+    query_compact = normalize_compact(normalized_query)
     source_job_id = normalize(candidate.fields.get(FIELD_ALIASES["source_job_id"], ""))
     marker = normalize(candidate.fields.get(FIELD_ALIASES["marker"], ""))
     source_url = normalize(candidate.fields.get(FIELD_ALIASES["source_url"], ""))
 
     if normalized_query in {file_name, file_stem, source_job_id, marker}:
         return 1000
+    if normalized_query == title or (query_compact and query_compact == title_compact):
+        return 950
     if normalized_query and normalized_query in source_job_id:
         return 900
     if normalized_query and normalized_query in marker:
         return 850
+    if query_compact and title_compact and query_compact in title_compact:
+        return 830
     if normalized_query and normalized_query in source_url:
         return 800
+    if query_compact and title_compact and title_compact in query_compact:
+        return 780
     if normalized_query and normalized_query in file_name:
         return 750
     term_score = 0
@@ -169,6 +191,7 @@ def searchable_values(candidate: JobCandidate) -> list[str]:
         candidate.path.name,
         candidate.path.stem,
         candidate.title,
+        normalize_compact(candidate.title),
         *candidate.fields.values(),
     ]
     return [normalize(value) for value in values if value]
@@ -208,6 +231,8 @@ def build_candidate_payload(candidate: JobCandidate) -> dict:
         "title": candidate.title,
         "source_job_id": candidate.fields.get(FIELD_ALIASES["source_job_id"], ""),
         "marker": candidate.fields.get(FIELD_ALIASES["marker"], ""),
+        "company": candidate.fields.get(FIELD_ALIASES["company"], ""),
+        "city": candidate.fields.get(FIELD_ALIASES["city"], ""),
     }
 
 
@@ -219,6 +244,11 @@ def to_source_file(candidate: JobCandidate) -> str:
 
 def normalize(value: str) -> str:
     return value.strip().lower()
+
+
+def normalize_compact(value: str) -> str:
+    lowered = normalize(value)
+    return re.sub(r"[\s\-_+|｜/\\:：,，.。;；()（）\[\]【】<>《》\"'`~!！?？]+", "", lowered)
 
 
 def extract_job_identifier_terms(text: str) -> list[str]:

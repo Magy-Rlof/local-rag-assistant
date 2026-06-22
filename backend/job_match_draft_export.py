@@ -139,9 +139,6 @@ def render_export_content(draft_response: dict, note: str) -> str:
         f"- 公司：{confirmation['company']}",
         f"- 城市：{confirmation['city']}",
         f"- 来源岗位 ID：{confirmation['source_job_id']}",
-        f"- 来源标识：{confirmation['marker']}",
-        f"- 来源文件：{confirmation['source_file']}",
-        f"- 来源 URL：{confirmation['source_url']}",
         "",
         "## 当前简历状态",
         "",
@@ -167,8 +164,6 @@ def render_export_content(draft_response: dict, note: str) -> str:
     lines.extend(render_cannot_claim(draft["resume_revision_candidates"]["cannot_claim"]))
     lines.extend(["", "## 面试准备问题", ""])
     lines.extend(render_list(draft["interview_questions"]))
-    lines.extend(["", "## source_refs", ""])
-    lines.extend(render_source_refs(draft))
     lines.extend(["", "## 证据缺口", ""])
     lines.extend(render_list(draft["evidence_gaps"]))
     lines.extend(["", "## 安全说明", ""])

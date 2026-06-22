@@ -328,7 +328,7 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
             "sources": [],
             "retrieval_seconds": 0.0,
             "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
-            "mode": "system",
+            "mode": "chat",
             "task_type": task_type,
             "question": question,
             "job_tool_result": {
@@ -817,14 +817,6 @@ def format_category_summary(category_key: str, label: str) -> str:
 
 
 def answer_system_question(question: str) -> str:
-    compact_question = "".join(question.lower().split())
-    if any(pattern in compact_question for pattern in ("什么是rag", "rag是什么", "简单说下什么是rag")):
-        return (
-            "RAG 是检索增强生成：系统先从本地资料库检索与问题相关的片段，"
-            "再把这些片段作为上下文交给模型或本地规则生成回答，并尽量附上来源引用。"
-            "它适合回答需要结合资料依据的问题，但不能替代对原文和引用的人工核对。"
-        )
-
     model_keywords = ["哪个模型", "什么模型", "使用的模型", "正在使用", "chat模型", "Chat 模型"]
     embedding_keywords = ["embedding", "Embedding", "向量模型", "嵌入模型"]
     vector_keywords = ["向量库", "qdrant", "Qdrant", "collection"]

@@ -359,10 +359,10 @@ def build_rag_choice_spec(angle: str) -> dict:
             "explanation": "召回评估要核对问题、片段和来源，不能只看生成结果。",
         },
         "引用绑定": {
-            "stem": "在岗位资料 RAG 问答中，为什么需要把回答和 source_refs 绑定？",
+            "stem": "在岗位资料 RAG 问答中，为什么需要把回答和来源引用绑定？",
             "correct": "方便核对答案来自哪份岗位 Markdown 和哪条要求，降低生成内容不可追溯的风险。",
             "distractors": [
-                "source_refs 只是装饰字段，不影响岗位事实核验。",
+                "来源引用只是装饰字段，不影响岗位事实核验。",
                 "只要回答看起来合理，就不需要保留来源。",
                 "引用绑定会自动证明候选人已经具备岗位能力。",
             ],
@@ -380,7 +380,7 @@ def build_rag_choice_spec(angle: str) -> dict:
         },
         "API 契约与输出格式": {
             "stem": "岗位要求同时提到 HTTP API、JSON 和 RAG 时，接口契约最需要保证什么？",
-            "correct": "请求参数、响应 schema、错误码、超时行为和 source_refs 字段稳定可解析。",
+            "correct": "请求参数、响应 schema、错误码、超时行为和来源引用字段稳定可解析。",
             "distractors": [
                 "只返回自然语言文本，不需要任何结构化字段。",
                 "字段名可以每次随机变化，由前端自行猜测。",
@@ -510,7 +510,6 @@ def render_questions_markdown(job_profile: dict, questions: list[dict]) -> str:
         "",
         f"- 公司：{company}",
         f"- 来源岗位 ID：{job_profile.get('job_id') or '来源未提供'}",
-        f"- 来源文件：{job_profile.get('source_file') or '来源未提供'}",
         "",
         "## 题目",
     ]
@@ -561,14 +560,6 @@ def render_question_markdown(question: dict) -> list[str]:
             f"- 来源要求：{question.get('source_requirement', '')}",
         ]
     )
-    refs = question.get("source_refs") or []
-    if refs:
-        lines.append("- source_refs：")
-        for ref in refs:
-            lines.append(
-                f"  - {ref.get('type', 'job_description')} | {ref.get('source_id', '')} | "
-                f"{ref.get('relative_path', '')} | {ref.get('quote', '')}"
-            )
     lines.append(f"- 安全提示：{question.get('safety_note') or question.get('risk_hint', '')}")
     return lines
 

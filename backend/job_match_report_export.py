@@ -13,7 +13,6 @@ from .job_match_draft_export import (
     render_interview_only,
     render_list,
     render_match_points,
-    render_source_refs,
 )
 
 
@@ -235,9 +234,6 @@ def render_report_content(draft_response: dict, interview_response: dict, summar
         f"- 公司：{confirmation['company']}",
         f"- 城市：{confirmation['city']}",
         f"- 来源岗位 ID：{confirmation['source_job_id']}",
-        f"- 来源标识：{confirmation['marker']}",
-        f"- 来源文件：{confirmation['source_file']}",
-        f"- 来源 URL：{confirmation['source_url']}",
         "",
         "## 当前简历状态",
         "",
@@ -283,8 +279,6 @@ def render_report_content(draft_response: dict, interview_response: dict, summar
     lines.extend(render_cannot_claim(revision["cannot_claim"]))
     lines.extend(["", "## 面试模拟问题", ""])
     lines.extend(render_interview_questions(session))
-    lines.extend(["", "## source_refs", ""])
-    lines.extend(render_source_refs(draft))
     lines.extend(["", "## 证据缺口", ""])
     lines.extend(render_list(draft["evidence_gaps"]))
     if summary:
@@ -309,12 +303,6 @@ def render_interview_questions(session: dict | None) -> list[str]:
         lines.append(f"  - 考察意图：{question['intent']}")
         for checkpoint in question["answer_checkpoints"][:4]:
             lines.append(f"  - 回答检查点：{checkpoint}")
-        for ref in question.get("source_refs", [])[:3]:
-            lines.append(
-                "  - source_ref："
-                f"{ref.get('type', '')} | {ref.get('source_id', '')} | "
-                f"{ref.get('relative_path', '')} | {ref.get('section', '')} | {ref.get('quote', '')}"
-            )
         lines.append(f"  - 风险提醒：{question['risk_reminder']}")
     return lines
 

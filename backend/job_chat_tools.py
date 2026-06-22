@@ -11,6 +11,7 @@ from .job_resolver import (
     build_job_payload,
     extract_job_identifier_terms,
     find_best_job_candidate,
+    find_job_candidates,
     iter_job_candidates,
     to_source_file,
 )
@@ -26,6 +27,10 @@ PRODUCTION_INTAKE_OUTPUT_DIR = WORKSPACE_ROOT / "tools" / "jobonline-poc" / "out
 
 def build_job_chat_tool_result(question: str, history: list[dict] | None = None) -> dict:
     current_text = question or ""
+    private_job_list_answer = build_private_local_job_list_answer(current_text)
+    if private_job_list_answer:
+        return {"artifacts": [], "answer_note": private_job_list_answer, "generation_seconds": 0.0}
+
     screenshot_list_answer = build_manual_screenshot_job_list_answer(current_text)
     if screenshot_list_answer:
         return {"artifacts": [], "answer_note": screenshot_list_answer, "generation_seconds": 0.0}
@@ -168,7 +173,7 @@ def build_direct_job_lookup_answer(text: str) -> str:
     if not is_direct_job_lookup_question(text):
         return ""
     try:
-        candidate = find_best_job_candidate(extract_target_query(text) or text)
+        candidate = find_best_job_candidate(extract_target_query(text) or extract_lookup_target_query(text) or text)
     except ValueError:
         return ""
     if not candidate:
@@ -189,14 +194,98 @@ def build_direct_job_lookup_answer(text: str) -> str:
         f"- 公司：{payload.get('company') or '来源未提供'}",
         f"- 城市：{payload.get('city') or '来源未提供'}",
         f"- 来源岗位 ID：{payload.get('source_job_id') or '来源未提供'}",
-        f"- 真实岗位来源标识：{payload.get('marker') or '来源未提供'}",
-        f"- 来源文件：{payload.get('source_file') or '来源未提供'}",
         f"- 岗位职责摘要：{responsibilities}",
         f"- 任职要求摘要：{requirements}",
         "",
         SCOPE_NOTE,
         SAFETY_NOTE,
     ]
+    return "\n".join(lines)
+
+
+def build_private_local_job_list_answer(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    compact = re.sub(r"\s+", "", normalized.lower())
+    triggers = (
+        "本地私有岗位有哪些",
+        "私有岗位有哪些",
+        "本地岗位有哪些",
+        "本地岗位列表",
+        "本地私有职位",
+        "本地私有岗位",
+    )
+    if not any(trigger in compact for trigger in triggers):
+        return ""
+
+    jobs = []
+    for candidate in iter_job_candidates():
+        if candidate.source != "private":
+            continue
+        payload = build_job_payload(candidate)
+        jobs.append(payload)
+
+    if not jobs:
+        return "\n".join(
+            [
+                "当前本地私有岗位资料库中没有可列出的岗位。",
+                "",
+                SCOPE_NOTE,
+                SAFETY_NOTE,
+            ]
+        )
+
+    lines = ["当前本地私有岗位资料库中的岗位包括：", ""]
+    for index, job in enumerate(jobs[:30], start=1):
+        lines.extend(
+            [
+                f"{index}. {job.get('title') or '未命名岗位'}｜{job.get('company') or '来源未提供'}｜{job.get('city') or '来源未提供'}",
+                f"   - 来源岗位 ID：{job.get('source_job_id') or job.get('marker') or '来源未提供'}",
+            ]
+        )
+    if len(jobs) > 30:
+        lines.append(f"... 其余 {len(jobs) - 30} 条未展开。")
+    lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
+    return "\n".join(lines)
+
+
+def extract_lookup_target_query(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^(请|帮我|麻烦)?为(岗位|职位)?", "", cleaned).strip()
+    cleaned = re.sub(r"^(请|帮我|麻烦)?(查找|查询|找一下|找|看看|检索)", "", cleaned).strip()
+    cleaned = re.sub(r"(这个|这条)?(岗位|职位|JD|jd)$", "", cleaned).strip()
+    cleaned = re.sub(r"(生成|做|创建).*$", "", cleaned).strip()
+    cleaned = re.sub(r"(这个|这条)?(岗位|职位|JD|jd)$", "", cleaned).strip()
+    return cleaned.strip(" ：:，,。.;；")
+
+
+def build_job_candidate_selection_answer(text: str, action_label: str) -> str:
+    query = extract_target_query(text) or extract_lookup_target_query(text) or text
+    if not query:
+        return ""
+    try:
+        candidates = find_job_candidates(query, limit=5)
+    except ValueError:
+        return ""
+    if not candidates:
+        return ""
+
+    lines = [
+        f"我找到了 {len(candidates)} 个可能相关的岗位。请用来源岗位 ID 明确要{action_label}的岗位：",
+        "",
+    ]
+    for index, candidate in enumerate(candidates, start=1):
+        payload = build_job_payload(candidate)
+        lines.extend(
+            [
+                f"{index}. {payload.get('title') or '未命名岗位'}｜{payload.get('company') or '来源未提供'}｜{payload.get('city') or '来源未提供'}",
+                f"   - 来源岗位 ID：{payload.get('source_job_id') or payload.get('marker') or '来源未提供'}",
+            ]
+        )
+    lines.extend(["", f"例如：请为岗位 {build_job_payload(candidates[0]).get('source_job_id') or '岗位ID'} {action_label}"])
     return "\n".join(lines)
 
 
@@ -234,7 +323,6 @@ def build_manual_screenshot_job_list_answer(text: str) -> str:
             [
                 f"{index}. {job.get('title') or '未命名岗位'}｜{job.get('company') or '来源未提供'}｜{job.get('city') or '来源未提供'}",
                 f"   - 来源岗位 ID：{job.get('source_job_id') or '来源未提供'}",
-                f"   - 来源文件：{job.get('source_file') or '来源未提供'}",
             ]
         )
     lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
@@ -343,7 +431,6 @@ def build_recent_imported_job_list_answer(text: str) -> str:
             [
                 f"{index}. {job.get('title') or '未命名岗位'} - {job.get('company') or '来源未提供'} - {job.get('city') or '来源未提供'}",
                 f"   - 来源岗位 ID：{job.get('source_job_id') or '来源未提供'}",
-                f"   - 来源文件：{job.get('source_file') or '来源未提供'}",
             ]
         )
     lines.extend(
@@ -360,6 +447,13 @@ def is_direct_job_lookup_question(text: str) -> bool:
     normalized = text.strip()
     if not normalized:
         return False
+    if any(keyword in normalized for keyword in ("生成面试", "面试题", "面试模拟", "优化简历", "修改简历", "简历不足", "岗位匹配", "匹配报告")):
+        return False
+    if any(keyword in normalized for keyword in ("查找", "查询", "找一下", "找", "检索", "看看")) and any(keyword in normalized for keyword in ("岗位", "职位", "JD", "jd", "资料库")):
+        try:
+            return bool(find_job_candidates(extract_lookup_target_query(normalized) or normalized, limit=1))
+        except ValueError:
+            return False
     artifact_keywords = (
         "生成面试",
         "面试题",
@@ -379,7 +473,14 @@ def is_direct_job_lookup_question(text: str) -> bool:
     has_lookup_action = any(keyword in normalized for keyword in lookup_keywords)
     has_job_object = any(keyword in normalized for keyword in ("岗位", "职位", "JD", "jd", "资料库"))
     has_identifier = bool(extract_job_identifier_terms(normalized)) or ".md" in normalized.lower()
-    return has_identifier and (has_lookup_action or has_job_object)
+    if has_identifier and (has_lookup_action or has_job_object):
+        return True
+    if has_lookup_action and has_job_object:
+        try:
+            return bool(find_job_candidates(extract_lookup_target_query(normalized) or normalized, limit=1))
+        except ValueError:
+            return False
+    return False
 
 
 def summarize_job_field(text: str, label: str) -> str:
@@ -437,6 +538,16 @@ def extract_target_query(text: str) -> str:
             return payload.get("source_job_id") or payload.get("marker") or payload.get("file_name") or best_term
         return best_term
 
+    lookup_query = extract_lookup_target_query(text)
+    if lookup_query and lookup_query != text:
+        try:
+            candidates = find_job_candidates(lookup_query, limit=1)
+        except ValueError:
+            candidates = []
+        if candidates:
+            payload = build_job_payload(candidates[0])
+            return payload.get("source_job_id") or payload.get("marker") or payload.get("file_name") or candidates[0].title
+
     lowered = text.lower()
     best = ""
     for candidate in iter_job_candidates():
@@ -454,6 +565,17 @@ def extract_target_query(text: str) -> str:
         title = str(payload.get("title", "")).strip()
         if title and title.lower() in lowered:
             best = title
+    if best:
+        return best
+    lookup_query = extract_lookup_target_query(text)
+    if lookup_query:
+        try:
+            candidates = find_job_candidates(lookup_query, limit=1)
+        except ValueError:
+            candidates = []
+        if candidates:
+            payload = build_job_payload(candidates[0])
+            return payload.get("source_job_id") or payload.get("marker") or payload.get("file_name") or candidates[0].title
     return best
 
 
@@ -758,7 +880,7 @@ def build_interview_artifact(query: str) -> dict | None:
         generation_highlight,
         f"已生成 {len(questions)} 道面试模拟题。",
         f"题型分布：{type_summary_label}。",
-        "每题包含正确答案、解析、来源岗位要求、source_refs 和风险提示。",
+        "每题包含正确答案、解析、来源岗位要求和风险提示。",
     ]
     if cache_hit:
         highlights.append("缓存命中：本次复用了同一岗位和参数的已生成题目。")
@@ -889,14 +1011,6 @@ def render_interview_question_markdown(question: dict) -> list[str]:
             f"- 风险提示：{question.get('risk_hint') or question.get('risk_reminder', '')}",
         ]
     )
-    source_refs = question.get("source_refs") or []
-    if source_refs:
-        lines.extend(["", "source_refs："])
-        for ref in source_refs:
-            lines.append(
-                f"- {ref.get('type', 'job_description')} | {ref.get('source_id', '')} | "
-                f"{ref.get('relative_path', '')} | {ref.get('quote', '')}"
-            )
     return lines
 
 

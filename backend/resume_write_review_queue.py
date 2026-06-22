@@ -152,10 +152,9 @@ def render_review_content(draft: dict, note: str) -> str:
         "- 审核通过只表示可人工复制候选内容；系统不会自动修改真实简历。",
         "- 本审核项不调用 LLM、不访问招聘平台、不触发索引。",
         "",
-        "## 来源差异草稿",
+        "## 草稿来源",
         "",
-        f"- 来源文件：{draft['file_name']}",
-        f"- 来源路径：{draft['relative_path']}",
+        f"- 草稿文件：{draft['file_name']}",
         f"- 入队时间：{datetime.now().isoformat(timespec='seconds')}",
     ]
     if note.strip():
@@ -252,7 +251,7 @@ def read_source_metadata(item_path: Path) -> dict:
         content = item_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {"source_diff_file_name": "", "source_diff_relative_path": ""}
-    file_match = re.search(r"^- 来源文件：(.+)$", content, flags=re.MULTILINE)
+    file_match = re.search(r"^- (?:来源文件|草稿文件)：(.+)$", content, flags=re.MULTILINE)
     path_match = re.search(r"^- 来源路径：(.+)$", content, flags=re.MULTILINE)
     return {
         "source_diff_file_name": file_match.group(1).strip() if file_match else "",

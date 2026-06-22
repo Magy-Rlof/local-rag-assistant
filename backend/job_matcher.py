@@ -128,8 +128,6 @@ def build_analysis_prompt(target_job: dict, job_evidence: dict, current_resume: 
 - 公司：{target_job['company'] or '来源未提供'}
 - 城市：{target_job['city'] or '来源未提供'}
 - 来源岗位 ID：{target_job['source_job_id'] or '来源未提供'}
-- 来源文件：{target_job['source_file']}
-- 来源 URL：{target_job['source_url'] or '来源未提供'}
 - {resume_line}
 
 岗位职责证据：
