@@ -224,7 +224,8 @@ def build_private_local_job_list_answer(text: str) -> str:
         if candidate.source != "private":
             continue
         payload = build_job_payload(candidate)
-        jobs.append(payload)
+        if is_user_facing_private_job_payload(payload):
+            jobs.append(payload)
 
     if not jobs:
         return "\n".join(
@@ -237,17 +238,59 @@ def build_private_local_job_list_answer(text: str) -> str:
         )
 
     lines = ["当前本地私有岗位资料库中的岗位包括：", ""]
-    for index, job in enumerate(jobs[:30], start=1):
+    visible_jobs = jobs[:10]
+    lines.extend(["说明：默认只显示截图导入、授权导出和公众号授权文本岗位；阶段自测、样本、远程和公共来源岗位已隐藏。", ""])
+    for index, job in enumerate(visible_jobs, start=1):
         lines.extend(
             [
                 f"{index}. {job.get('title') or '未命名岗位'}｜{job.get('company') or '来源未提供'}｜{job.get('city') or '来源未提供'}",
                 f"   - 来源岗位 ID：{job.get('source_job_id') or job.get('marker') or '来源未提供'}",
             ]
         )
-    if len(jobs) > 30:
-        lines.append(f"... 其余 {len(jobs) - 30} 条未展开。")
+    hidden_count = len(jobs) - len(visible_jobs)
+    if hidden_count > 0:
+        lines.append(f"... 其余 {hidden_count} 条未展开。")
     lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
     return "\n".join(lines)
+
+
+def is_user_facing_private_job_payload(job: dict) -> bool:
+    source_id = str(job.get("source_job_id") or "").strip()
+    marker = str(job.get("marker") or "").strip()
+    title = str(job.get("title") or "").strip()
+    company = str(job.get("company") or "").strip()
+    city = str(job.get("city") or "").strip()
+    source_file = str(job.get("source_file") or "").strip()
+
+    if not source_id or source_id in {"来源未提供", "source not provided"}:
+        return False
+
+    allowed_prefixes = ("manual_screenshot_", "authorized_export_", "wechat_auth_")
+    if not any(source_id.startswith(prefix) or marker.startswith(prefix) for prefix in allowed_prefixes):
+        return False
+
+    haystack = f"{source_id} {marker} {title} {company} {city} {source_file}".lower()
+    blocked_terms = (
+        "stage",
+        "gate",
+        "selftest",
+        "fixture",
+        "sample",
+        "csv",
+        "batch",
+        "阶段",
+        "自测",
+        "样本",
+        "唯一写入",
+        "批量",
+        "原文粘贴",
+        "字段填写",
+    )
+    if any(term.lower() in haystack for term in blocked_terms):
+        return False
+    if "远程" in city or "远程" in title or "remote" in city.lower() or "remote" in title.lower():
+        return False
+    return True
 
 
 def extract_lookup_target_query(text: str) -> str:
