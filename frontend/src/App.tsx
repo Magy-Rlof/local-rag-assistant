@@ -84,6 +84,7 @@ import {
   updateResumeWriteReviewItem,
   uploadDocument,
 } from "./api";
+import { VercelV0Chat } from "./components/ui/v0-ai-chat";
 
 type PageKey = "ask" | "agent" | "resumes" | "library" | "index";
 type AgentTabKey = "overview" | "copies" | "interview";
@@ -168,13 +169,6 @@ const categoryMeta: Record<CategoryKey, { title: string; description: string; up
   },
 };
 
-const exampleQuestions = [
-  "根据我的简历，我更适合哪些岗位？",
-  "针对 AI 应用开发工程师岗位，这份简历应该怎么修改？",
-  "我的项目经历和 Java 后端岗位有哪些匹配点？",
-  "岗位资料里提到的核心能力有哪些？",
-];
-
 const libraryCategories: CategoryKey[] = ["industries", "jobs", "projects"];
 
 function App() {
@@ -257,10 +251,26 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
   const [loading, setLoading] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<ChatArtifact | null>(() => loadAskSelectedArtifact());
   const [showCitations, setShowCitations] = useState(false);
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
+  const [selectedCitationResponse, setSelectedCitationResponse] = useState<AskResponse | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
   const latestResponse = latestAssistantMessage?.response;
+  const activeCitationResponse = selectedCitationResponse ?? latestResponse;
+  const isEmptyConversation = messages.length === 0 && !error;
+  const showSidePanel = Boolean(sidePanelOpen && (selectedArtifact || activeCitationResponse));
+
+  function clearConversation() {
+    activeRequestIdRef.current = null;
+    setLoading(false);
+    setMessages([]);
+    setError("");
+    setSelectedArtifact(null);
+    setSelectedCitationResponse(null);
+    setSidePanelOpen(false);
+    clearAskConversationStorage();
+  }
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -285,7 +295,9 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
     setLoading(true);
     setError("");
     setSelectedArtifact(null);
+    setSelectedCitationResponse(null);
     setShowCitations(false);
+    setSidePanelOpen(false);
     const requestId = createRequestId();
     activeRequestIdRef.current = requestId;
     const userMessage: ConversationMessage = {
@@ -344,7 +356,9 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
           if (activeRequestIdRef.current !== requestId) return;
           if (nextResponse.artifacts[0]) {
             setSelectedArtifact(nextResponse.artifacts[0]);
+            setSelectedCitationResponse(null);
             setShowCitations(false);
+            setSidePanelOpen(true);
           }
           setMessages((currentMessages) =>
             currentMessages.map((message) =>
@@ -362,7 +376,9 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
       if (activeRequestIdRef.current !== requestId) return;
       if (finalResponse.artifacts[0]) {
         setSelectedArtifact(finalResponse.artifacts[0]);
+        setSelectedCitationResponse(null);
         setShowCitations(false);
+        setSidePanelOpen(true);
       }
       setMessages((currentMessages) =>
         currentMessages.map((message) =>
@@ -402,47 +418,23 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
   }
 
   return (
-    <section className="page ask-page">
-      <div className="ask-topline">
-        <h1>问答分析</h1>
-        <div className="ask-topline-actions">
-        {latestResponse && (
-          <div className="metric-group">
-            <span>{formatMode(latestResponse.mode)}</span>
-            <span>检索 {latestResponse.retrieval_seconds.toFixed(1)}s</span>
-            <span>生成 {latestResponse.generation_seconds.toFixed(1)}s</span>
-          </div>
-        )}
-        {messages.length > 0 && (
-          <button className="secondary-button small-button" onClick={() => {
-            activeRequestIdRef.current = null;
-            setLoading(false);
-            setMessages([]);
-            setError("");
-            setSelectedArtifact(null);
-            clearAskConversationStorage();
-          }}>
-            清空对话
-          </button>
-        )}
-        </div>
-      </div>
-
-      <div className="ai-layout">
-        <div className="chat-column">
+    <section className={`page ask-page ${isEmptyConversation ? "empty-ask-page" : ""}`}>
+      <div className={`ai-layout ${showSidePanel ? "with-side-panel" : "without-side-panel"} ${isEmptyConversation ? "empty-layout" : ""}`}>
+        <div className={`chat-column ${isEmptyConversation ? "empty-chat-column" : ""}`}>
+          {isEmptyConversation ? (
+            <div className="empty-chat-center">
+              <VercelV0Chat
+                value={question}
+                onValueChange={setQuestion}
+                onSubmit={() => submitQuestion()}
+                disabled={loading}
+                loading={loading}
+                title="问我关于简历、岗位或项目的问题"
+              />
+            </div>
+          ) : (
+          <>
           <section className="chat-surface">
-            {messages.length === 0 && !error && (
-              <div className="welcome-state">
-                <h2>问我关于简历、岗位或项目的问题</h2>
-                <div className="suggestion-chips">
-                  {exampleQuestions.map((item) => (
-                    <button key={item} onClick={() => setQuestion(item)}>
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
             {error && <div className="error-box">{error}</div>}
             {messages.length > 0 && (
               <div className="message-list">
@@ -465,6 +457,27 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
                       {message.response?.truncated && (
                         <div className="warning-box compact-alert">回答可能不完整。可以缩小问题范围后重试。</div>
                       )}
+                      {message.role === "assistant" && message.content && message.response && (
+                        <div className="message-bubble-meta">
+                          {message.response.mode === "rag" && (
+                            <button
+                              className="message-bubble-meta-button"
+                              type="button"
+                              onClick={() => {
+                                setSelectedArtifact(null);
+                                setSelectedCitationResponse(message.response ?? null);
+                                setShowCitations(true);
+                                setSidePanelOpen(true);
+                              }}
+                            >
+                              显示引用
+                            </button>
+                          )}
+                          <span>{formatMode(message.response.mode)}</span>
+                          <span>检索 {message.response.retrieval_seconds.toFixed(1)}s</span>
+                          <span>生成 {message.response.generation_seconds.toFixed(1)}s</span>
+                        </div>
+                      )}
                     </div>
                     {message.role === "assistant" && Boolean(message.response?.artifacts.length) && (
                       <div className="chat-artifact-stack">
@@ -475,7 +488,9 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
                             selected={selectedArtifact?.artifact_id === artifact.artifact_id}
                             onSelect={() => {
                               setSelectedArtifact(artifact);
+                              setSelectedCitationResponse(null);
                               setShowCitations(false);
+                              setSidePanelOpen(true);
                             }}
                             onOpenAgent={onOpenAgent}
                           />
@@ -498,53 +513,47 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
             )}
           </section>
 
-          <section className="composer">
-            <textarea
-              className="composer-input"
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submitQuestion();
-                }
-              }}
-              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-              disabled={loading}
-            />
-            <div className="composer-actions">
-              <button
-                className="send-button"
-                onClick={() => submitQuestion()}
-                disabled={loading || !question.trim()}
-                aria-label="发送消息"
-                title="发送消息"
-              >
-                {loading ? <Loader2 className="spin" size={17} /> : <Send size={17} />}
-              </button>
-            </div>
-          </section>
+          <VercelV0Chat
+            value={question}
+            onValueChange={setQuestion}
+            onSubmit={() => submitQuestion()}
+            disabled={loading}
+            loading={loading}
+            title=""
+            toolbarLeft={
+              messages.length > 0 ? (
+                <button className="v0-chat-clear" type="button" onClick={clearConversation}>
+                  清空对话
+                </button>
+              ) : null
+            }
+          />
+          </>
+          )}
         </div>
 
+        {showSidePanel && (
         <aside className={`citation-rail ask-side-panel ${selectedArtifact && !showCitations ? "showing-artifact" : ""}`}>
           <div className="rail-title-row">
             <div className="rail-title">{selectedArtifact && !showCitations ? "结果预览" : "引用"}</div>
-            <button
-              className="secondary-button small-button"
-              type="button"
-              onClick={() => setShowCitations((current) => !current)}
-            >
-              {showCitations ? "隐藏引用" : "显示引用"}
-            </button>
+            <div className="rail-title-actions">
+              <button
+                className="secondary-button small-button"
+                type="button"
+                onClick={() => setSidePanelOpen(false)}
+              >
+                隐藏
+              </button>
+            </div>
           </div>
           {selectedArtifact && !showCitations && (
             <ChatArtifactPreview artifact={selectedArtifact} onOpenAgent={onOpenAgent} />
           )}
           <div className="citation-content">
-          {!latestResponse?.sources.length && <div className="empty-state compact">暂无引用</div>}
+          {!activeCitationResponse?.sources.length && <div className="empty-state compact">暂无引用</div>}
           <div className="source-list">
-            {latestResponse?.sources.map((source) => (
-              <div className="source-card" key={`${source.source_file}-${source.title}`}>
+            {activeCitationResponse?.sources.map((source, index) => (
+              <div className="source-card" key={`${source.source_file}-${source.title}-${index}`}>
                 <strong title={source.title}>{source.title}</strong>
                 <span title={source.source_file}>{source.source_file}</span>
                 {source.score !== null && <small>score {source.score.toFixed(4)}</small>}
@@ -553,6 +562,7 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
           </div>
           </div>
         </aside>
+        )}
       </div>
     </section>
   );
@@ -571,6 +581,7 @@ function ChatArtifactCard({
 }) {
   const highlights = getArtifactHighlights(artifact).slice(0, 4);
   const metricEntries = getArtifactMetricEntries(artifact).slice(0, 4);
+  const cardDescription = getArtifactCardDescription(artifact);
 
   function handleAction(action: ChatArtifact["actions"][number]) {
     if (action.kind === "download_markdown") {
@@ -598,7 +609,7 @@ function ChatArtifactCard({
       <div className="artifact-card-header">
         <div>
           <div className="artifact-type-label">{formatArtifactType(artifact.type)}</div>
-          <p>{artifact.description}</p>
+          {cardDescription && <p>{cardDescription}</p>}
         </div>
         {artifact.file_name && (
           <span className="artifact-file-name" title={artifact.file_name}>
@@ -730,6 +741,14 @@ function getArtifactHighlights(artifact: ChatArtifact) {
     .map((line) => line.replace(/^[-#*\s]+/, "").trim())
     .filter(Boolean)
     .slice(0, 3);
+}
+
+function getArtifactCardDescription(artifact: ChatArtifact) {
+  const description = artifact.description.trim();
+  if (/^已生成\s*\d+\s*道题，包含选择题、判断题和简答题。?$/.test(description)) {
+    return "";
+  }
+  return description;
 }
 
 function getArtifactMetricEntries(artifact: ChatArtifact): Array<[string, string | number | boolean]> {
