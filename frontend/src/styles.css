@@ -1536,7 +1536,7 @@ textarea:focus-visible {
 }
 
 .agent-workspace-overview .agent-context-column {
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
@@ -3030,7 +3030,7 @@ textarea:focus-visible {
 
 @media (max-width: 1500px) and (min-width: 1101px) {
   .agent-workspace-overview .agent-context-column {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .agent-workspace-copies .agent-main-grid {

@@ -1497,35 +1497,6 @@ function JobAgentPage({ launch }: { launch: AgentLaunch | null }) {
               )}
             </section>
 
-            <section className="panel agent-draft-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>草稿预览</h2>
-                  <p>{draft?.matched ? "候选内容按可写入、需证据、仅面试和不能声称分组" : "先生成草稿"}</p>
-                </div>
-              </div>
-              {!draft?.matched || !draft.draft ? (
-                <div className="empty-state">暂无草稿预览。</div>
-              ) : (
-                <div className="draft-preview-grid">
-                  <DraftList title="可写入简历" items={draft.draft.resume_revision_candidates.can_write_to_resume} />
-                  <DraftList
-                    title="需补证据"
-                    items={draft.draft.resume_revision_candidates.requires_evidence_before_resume.map(
-                      (item) => `${item.candidate_direction}：${item.required_evidence}`
-                    )}
-                  />
-                  <DraftList
-                    title="仅适合面试"
-                    items={draft.draft.resume_revision_candidates.interview_only.map((item) => `${item.topic}：${item.usage}`)}
-                  />
-                  <DraftList
-                    title="不能声称"
-                    items={draft.draft.resume_revision_candidates.cannot_claim.map((item) => `${item.claim}：${item.reason}`)}
-                  />
-                </div>
-              )}
-            </section>
           </div>
 
           <section className="panel draft-list-panel">
