@@ -459,7 +459,7 @@ function AskPage({ onOpenAgent }: { onOpenAgent: (artifact: ChatArtifact) => voi
                       )}
                       {message.role === "assistant" && message.content && message.response && (
                         <div className="message-bubble-meta">
-                          {message.response.mode === "rag" && (
+                          {message.response.mode === "rag" && message.response.sources.length > 0 && (
                             <button
                               className="message-bubble-meta-button"
                               type="button"

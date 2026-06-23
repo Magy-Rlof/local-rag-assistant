@@ -322,13 +322,14 @@ def prepare_generation(question: str, history: list[dict] | None = None) -> dict
 
     job_tool_result = build_job_chat_tool_result(question, safe_history)
     if job_tool_result.get("answer_note"):
+        tool_mode = job_tool_result.get("mode") or "chat"
         return {
             "messages": [],
             "direct_answer": job_tool_result["answer_note"],
             "sources": [],
             "retrieval_seconds": 0.0,
             "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
-            "mode": "chat",
+            "mode": tool_mode,
             "task_type": task_type,
             "question": question,
             "job_tool_result": {
@@ -491,7 +492,7 @@ def ask_with_rag(question: str, history: list[dict] | None = None) -> dict:
             "sources": [],
             "retrieval_seconds": 0.0,
             "generation_seconds": job_tool_result.get("generation_seconds", 0.0),
-            "mode": "chat",
+            "mode": job_tool_result.get("mode") or "chat",
             "artifacts": job_tool_result["artifacts"],
         }
 

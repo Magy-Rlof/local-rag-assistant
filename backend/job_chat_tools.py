@@ -27,21 +27,21 @@ PRODUCTION_INTAKE_OUTPUT_DIR = WORKSPACE_ROOT / "tools" / "jobonline-poc" / "out
 
 def build_job_chat_tool_result(question: str, history: list[dict] | None = None) -> dict:
     current_text = question or ""
-    private_job_list_answer = build_private_local_job_list_answer(current_text)
-    if private_job_list_answer:
-        return {"artifacts": [], "answer_note": private_job_list_answer, "generation_seconds": 0.0}
-
     screenshot_list_answer = build_manual_screenshot_job_list_answer(current_text)
     if screenshot_list_answer:
-        return {"artifacts": [], "answer_note": screenshot_list_answer, "generation_seconds": 0.0}
+        return {"artifacts": [], "answer_note": screenshot_list_answer, "generation_seconds": 0.0, "mode": "rag"}
 
     recent_import_answer = build_recent_imported_job_list_answer(current_text)
     if recent_import_answer:
-        return {"artifacts": [], "answer_note": recent_import_answer, "generation_seconds": 0.0}
+        return {"artifacts": [], "answer_note": recent_import_answer, "generation_seconds": 0.0, "mode": "rag"}
+
+    private_job_list_answer = build_private_local_job_list_answer(current_text)
+    if private_job_list_answer:
+        return {"artifacts": [], "answer_note": private_job_list_answer, "generation_seconds": 0.0, "mode": "rag"}
 
     direct_lookup_answer = build_direct_job_lookup_answer(current_text)
     if direct_lookup_answer:
-        return {"artifacts": [], "answer_note": direct_lookup_answer, "generation_seconds": 0.0}
+        return {"artifacts": [], "answer_note": direct_lookup_answer, "generation_seconds": 0.0, "mode": "rag"}
 
     if not is_job_tool_intent(current_text):
         return {"artifacts": [], "answer_note": ""}
@@ -216,7 +216,7 @@ def build_private_local_job_list_answer(text: str) -> str:
         "本地私有职位",
         "本地私有岗位",
     )
-    if not any(trigger in compact for trigger in triggers):
+    if not is_private_local_job_list_question(normalized):
         return ""
 
     jobs = []
@@ -252,6 +252,64 @@ def build_private_local_job_list_answer(text: str) -> str:
         lines.append(f"... 其余 {hidden_count} 条未展开。")
     lines.extend(["", SCOPE_NOTE, SAFETY_NOTE])
     return "\n".join(lines)
+
+
+def is_private_local_job_list_question(text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    compact = re.sub(r"\s+", "", normalized.lower())
+
+    deny_keywords = (
+        "生成",
+        "面试",
+        "模拟",
+        "简历",
+        "分析",
+        "优化",
+        "修改",
+        "匹配",
+        "报告",
+        "推荐",
+        "适合",
+        "查找",
+        "查询",
+        "检索",
+        "核心能力",
+        "能力有哪些",
+        "要求有哪些",
+        "职责有哪些",
+        "提到的",
+    )
+    if any(keyword in normalized for keyword in deny_keywords):
+        return False
+
+    has_job_object = any(keyword in compact for keyword in ("岗位", "职位", "工作", "jd"))
+    if not has_job_object:
+        return False
+
+    list_markers = (
+        "有哪些",
+        "有什么",
+        "有哪几个",
+        "多少个",
+        "几个",
+        "列出",
+        "列表",
+        "清单",
+        "当前",
+        "现在",
+        "目前",
+        "本地",
+        "私有",
+        "资料库",
+        "岗位库",
+        "职位库",
+        "已导入",
+        "导入",
+        "收录",
+    )
+    return any(marker in compact for marker in list_markers)
 
 
 def is_user_facing_private_job_payload(job: dict) -> bool:
@@ -439,6 +497,10 @@ def build_recent_production_intake_answer() -> str:
 def build_recent_imported_job_list_answer(text: str) -> str:
     normalized = text.strip()
     if not normalized:
+        return ""
+    if any(keyword in normalized for keyword in ("核心能力", "能力有哪些", "要求有哪些", "职责有哪些", "提到的")):
+        return ""
+    if not any(keyword in normalized for keyword in ("刚导入", "已导入", "导入", "新增", "最近一次", "最近", "n8n", "N8N")):
         return ""
     if not any(keyword in normalized for keyword in ("资料库", "岗位资料", "刚导入", "导入", "新增")):
         return ""
