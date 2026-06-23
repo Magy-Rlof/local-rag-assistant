@@ -33,37 +33,47 @@ Local RAG Assistant 是一个面向个人求职资料管理、岗位资料分析
 
 ## 界面预览
 
-> 下面截图仍是占位图，后续会替换为当前新版 UI 截图。
-
 ### 问答分析
 
 用于普通对话、资料问答、岗位查找、面试题生成和简历优化草稿生成。
 
 ![问答分析](docs/images/01-ask-empty.png)
 
-### RAG 问答与引用来源
+### 问答分析：资料问答与引用来源
 
 资料问答会展示回答内容、模式、检索耗时、生成耗时，并在有引用时显示引用侧栏。
 
-![RAG 问答与引用来源](docs/images/02-ask-rag-answer.png)
+![问答分析：资料问答与引用来源](docs/images/02-ask-chat.png)
+
+### 面试模拟题
+
+基于目标岗位生成面试模拟题，右侧可预览题目、答案、解析、来源岗位要求和风险提示。
+
+![面试模拟题](docs/images/03-interview-simulation.png)
+
+### 求职 Agent
+
+用于定位目标岗位、生成可审核草稿、保存报告，并进入面试模拟准备流程。
+
+![求职 Agent](docs/images/04-job-agent.png)
 
 ### 简历中心
 
 用于上传简历、删除简历、设置当前简历。当前简历会作为简历分析和岗位匹配的优先资料。
 
-![简历中心](docs/images/03-resume-center.png)
+![简历中心](docs/images/05-resume-library.png)
 
 ### 资料库
 
 用于管理行业资料、岗位资料和项目资料。Markdown 文档支持在线查看和编辑。
 
-![资料库](docs/images/04-knowledge-base.png)
+![资料库](docs/images/06-knowledge-base.png)
 
 ### 索引状态
 
 用于更新本地向量索引，并查看更新、跳过、删除、写入片段等状态。
 
-![索引状态](docs/images/05-index-status.png)
+![索引状态](docs/images/07-index-status.png)
 
 ## 典型使用流程
 
@@ -80,9 +90,6 @@ Local RAG Assistant 是一个面向个人求职资料管理、岗位资料分析
 ```text
 简单说下什么是 RAG
 当前有哪些本地岗位？
-请查找 manual_screenshot_20260618_ai_agent_dev_gissoft 这个岗位
-请为岗位 manual_screenshot_20260618_ai_agent_dev_gissoft 生成面试模拟题
-请分析 authorized_export_20260619_rag_implementation_consultant 的简历不足，并生成优化草稿
 根据我的简历，我更适合哪些岗位？
 岗位资料里提到的核心能力有哪些？
 ```
